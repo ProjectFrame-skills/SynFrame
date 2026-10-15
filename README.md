@@ -182,5 +182,3 @@ This repository distributes the implementation and usage documentation. Personal
 - **A saved run has a different identity:** Do not edit recorded hashes. Use the matching archived installation or a linked follow-up run with explicit reassessment. Installation backups preserve the original code.
 - **Input rejected:** Inspect the current schema and reported field/type. Avoid guessing field names or attaching a newer revision number to an old Review.
 - **Work takes too long:** Distinguish necessary research from repeated retrieval of the same information. End sufficient units while preserving important gaps and follow-up obligations.
-
-The README structure draws on the [UI UX Pro Max Korean README](https://github.com/nextlevelbuilder/ui-ux-pro-max-skill/blob/main/README.ko.md). Capabilities and installation instructions describe SynFrame's own implementation.
