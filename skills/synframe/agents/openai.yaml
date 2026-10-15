@@ -1,0 +1,6 @@
+interface:
+  display_name: "SynFrame"
+  short_description: "Discover knowledge and compose evidence-backed solutions"
+  default_prompt: "Use $synframe to discover the knowledge and capabilities needed for my goal, compose an executable solution, and validate the requested result under ACDS v3.2."
+policy:
+  allow_implicit_invocation: true

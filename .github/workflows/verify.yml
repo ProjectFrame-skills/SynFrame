@@ -1,0 +1,21 @@
+name: Verify SynFrame
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  runtime:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.11', '3.13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Run runtime checks
+        run: python3 tools/verify.py
+      - name: Verify isolated installation
+        run: |
+          python3 tools/install.py --destination "$RUNNER_TEMP/skills/synframe"
+          python3 "$RUNNER_TEMP/skills/synframe/scripts/synframe.py" schema --entities Frame SolutionCandidate
