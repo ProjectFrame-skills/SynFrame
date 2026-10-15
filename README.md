@@ -6,6 +6,21 @@
 ![Python](https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white)
 ![Runtime](https://img.shields.io/badge/runtime-standard%20library%20%2B%20SQLite-16a34a)
 
+## 🚀 Install with npm
+
+```bash
+npm install -g synframe-cli@latest
+synframe install
+```
+
+**Or install the skill in one command, without a global CLI:**
+
+```bash
+npx --yes synframe-cli@latest install
+```
+
+Requires Node.js 18+ and Python 3.11+. Invoke `$synframe` in a new Codex conversation after installation.
+
 **An AI skill that connects the knowledge and tools you need and guides you toward an easier path to your desired result.**
 
 SynFrame starts from your goal to explore and explain **what knowledge you need, which tools and skills to use, and how to combine and apply them to reach your desired result more easily.**
@@ -30,7 +45,11 @@ Recommendations lead with the best-supported combination for the current goal. T
 
 ### Codex
 
-You need Python 3.11 or later and Git. The runtime helper uses only the Python standard library and SQLite.
+The npm quick start above is the simplest route. The CLI has no npm dependencies; the runtime helper uses only the Python standard library and SQLite.
+
+### Install from source (optional)
+
+You can also install directly with Git.
 
 ```bash
 git clone https://github.com/ProjectFrame-skills/SynFrame.git
@@ -41,7 +60,7 @@ python3 tools/install.py
 The default destination is `${CODEX_HOME:-$HOME/.codex}/skills/synframe`. Invoke the skill in a new Codex conversation after installation. You can also choose an explicit destination:
 
 ```bash
-python3 tools/install.py --destination /absolute/path/to/skills/synframe
+synframe install --destination /absolute/path/to/skills/synframe
 ```
 
 An existing SynFrame installation is backed up before replacement. The command reports the installed location, backup location, and file hashes. It refuses to replace a different skill directory.
@@ -50,26 +69,44 @@ SynFrame requires no dedicated model API key or reasoning server. The host AI pe
 
 ## Usage
 
-### Invoke explicitly
+### Examples adapted from real conversations
+
+These examples summarize the user's actual requests and the directions discussed. They illustrate how a goal connects to knowledge, tools, and a solution path; they are not fixed product-specific answers.
+
+#### 1. Turn reference websites into improvements for an app
 
 ```text
-$synframe I want to improve the app I'm building using other websites as references.
-Research the necessary concepts and automation options, then recommend an approach for my project.
+$synframe I want to improve the app I'm building using other websites as design references.
+Investigate how I should approach it.
 ```
+
+**Connections discussed:** discover the design-token and design-system perspective → assess reference extraction with Dembrandt → combine it with UI/UX Pro Max to define design rules and application conditions → assess transfer into the target app and review the result.
+
+**What the user gets:** a recommendation that explains what to extract, how to organize it, and how to apply it, beyond a list of tool names.
+
+#### 2. Add subscriptions and paid features to a skill
 
 ```text
-$synframe Add subscriptions to this project.
-Investigate how the reference product actually operates and assess payment, access control, and distribution together.
+$synframe I want to add billing to the skills I'm building,
+and unlock future features only for paying users. How can I do it?
 ```
+
+**Exploration discussed:** investigate the reference product's actual payment, distribution, and access model → compare payment and authorization combinations → examine enforcement boundaries, connection requirements, and bypass risks → derive a project-specific implementation and validation path.
+
+**What the user gets:** the connections from payment to actual feature access, together with the decisions needed to make them work.
+
+#### 3. Improve response speed without losing functionality
 
 ```text
-$synframe Build a tool that totals payment CSVs by customer and currency.
-Handle invalid input and verify the actual execution results.
+$synframe Investigate optimization opportunities without functional losses,
+and extract only feasible options.
 ```
 
-You do not need to specify technology names, learning depth, or search counts. The current installation is verified for Codex skills. Automatic selection depends on the host configuration; explicit `$synframe` invocation is available.
+**Connections discussed:** inspect repeated retrieval, serialization, and error-retry costs → exclude reductions in learning, discovery, or validation → consider independent query bundles, exact returned-object reuse, and compact machine JSON → verify preservation of state, evidence, and recovery responsibilities.
 
-These are README usage examples. They do not prescribe products, domains, or expected answers in the operating contracts.
+**What the user gets:** actionable candidates that distinguish reducible mechanical costs from necessary judgments.
+
+Technology names, learning depth, and search counts need not be specified in advance. Automatic selection depends on the host configuration; explicit `$synframe` invocation is available. These examples remain README usage material and are not loaded as operating conditions.
 
 ### Resume saved work
 

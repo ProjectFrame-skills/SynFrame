@@ -16,3 +16,5 @@ __pycache__/
 /tools/check_*.py
 /tools/host_smoke.py
 /tools/runtime_io_check.py
+node_modules/
+*.tgz

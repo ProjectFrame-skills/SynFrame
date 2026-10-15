@@ -1,0 +1,46 @@
+{
+  "name": "synframe-cli",
+  "version": "0.1.0",
+  "description": "Discover knowledge, compose tools and skills, and explore executable solutions. Install the SynFrame skill for Codex.",
+  "type": "module",
+  "bin": {
+    "synframe": "cli/synframe.mjs"
+  },
+  "files": [
+    "cli/*.mjs",
+    "skills/synframe/SKILL.md",
+    "skills/synframe/agents/*.yaml",
+    "skills/synframe/references/*.md",
+    "skills/synframe/scripts/*.py",
+    "skills/synframe/scripts/synframe_core/*.py",
+    "tools/install.py",
+    "README.ko.md",
+    "README.zh.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ProjectFrame-skills/SynFrame.git"
+  },
+  "homepage": "https://github.com/ProjectFrame-skills/SynFrame#readme",
+  "bugs": {
+    "url": "https://github.com/ProjectFrame-skills/SynFrame/issues"
+  },
+  "keywords": [
+    "codex",
+    "skill",
+    "ai",
+    "knowledge-discovery",
+    "tools",
+    "synframe"
+  ],
+  "scripts": {
+    "test": "node --test tests/npm-cli.test.mjs"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}

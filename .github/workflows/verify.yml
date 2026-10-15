@@ -15,6 +15,13 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Run runtime checks
         run: python3 tools/verify.py
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Verify npm CLI
+        run: npm test
+      - name: Verify npm package contents
+        run: npm pack --dry-run
       - name: Verify isolated installation
         run: |
           python3 tools/install.py --destination "$RUNNER_TEMP/skills/synframe"

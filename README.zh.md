@@ -6,6 +6,21 @@
 ![Python](https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white)
 ![Runtime](https://img.shields.io/badge/runtime-standard%20library%20%2B%20SQLite-16a34a)
 
+## 🚀 使用 npm 快速安装
+
+```bash
+npm install -g synframe-cli@latest
+synframe install
+```
+
+**也可不安装全局 CLI，直接用一条命令安装 skill：**
+
+```bash
+npx --yes synframe-cli@latest install
+```
+
+需要 Node.js 18+ 和 Python 3.11+。安装后在新的 Codex 对话中调用 `$synframe`。
+
 **一个连接所需知识与工具，引导用户更容易接近目标结果的 AI skill。**
 
 SynFrame 从用户目标出发，探索并说明**需要哪些知识、应该使用哪些工具和 skill，以及如何组合并应用它们，更容易获得期望的结果。**
@@ -30,7 +45,11 @@ AI 会主动探索并理解必要知识，评估工具与 skill 的组合，将�
 
 ### Codex
 
-需要 Python 3.11 或更高版本及 Git。运行辅助代码只使用 Python 标准库和 SQLite。
+上方 npm 快速安装是最简单的方法。CLI 不依赖其他 npm 包；运行辅助代码只使用 Python 标准库和 SQLite。
+
+### 从源码安装（可选）
+
+也可以通过 Git 直接安装。
 
 ```bash
 git clone https://github.com/ProjectFrame-skills/SynFrame.git
@@ -41,7 +60,7 @@ python3 tools/install.py
 默认安装位置为 `${CODEX_HOME:-$HOME/.codex}/skills/synframe`。安装后在新的 Codex 对话中调用，也可显式指定路径：
 
 ```bash
-python3 tools/install.py --destination /absolute/path/to/skills/synframe
+synframe install --destination /absolute/path/to/skills/synframe
 ```
 
 替换前会备份已有的 SynFrame 安装。命令会报告安装位置、备份位置及文件 hash，并拒绝覆盖其他 skill 目录。
@@ -50,26 +69,44 @@ SynFrame 不需要专用模型 API key 或推理服务器。研究、编码和�
 
 ## 使用方法
 
-### 显式调用
+### 来自真实对话的使用示例
+
+以下示例根据用户的真实请求及讨论方向整理，展示如何从目标连接到知识、工具与解决路径，而非特定产品的固定答案。
+
+#### 1. 将参考网站转化为应用设计改进
 
 ```text
-$synframe 我想参考其他网站，改善正在开发的应用设计。
-请研究必要概念和自动化手段，并推荐适合当前项目的方法。
+$synframe 我想参考其他网站的设计，改善正在开发的应用。
+请调查应该如何进行。
 ```
+
+**讨论过的连接：** 发现设计 token 与设计系统视角 → 评估通过 Dembrandt 提取参考信息 → 与 UI/UX Pro Max 组合，整理设计规则与应用条件 → 评估如何迁移到目标应用并审查结果。
+
+**用户得到的内容：** 说明提取什么、如何整理、怎样连接到应用的建议，而不仅是工具名称列表。
+
+#### 2. 为正在开发的 skill 增加订阅和付费功能
 
 ```text
-$synframe 为当前项目增加订阅功能。
-请调查参考产品的实际运营方式，并一起评估支付、权限和分发的衔接。
+$synframe 我想为正在开发的 skills 增加收费功能，
+以后新增的功能只对付费用户开放。应该如何实现？
 ```
+
+**讨论过的探索方向：** 调查参考产品实际的支付、分发与权限机制 → 比较支付手段和授权验证的组合 → 检查功能限制位置、衔接前提与绕过风险 → 推导适合项目的实现及验证路径。
+
+**用户得到的内容：** 从支付到实际功能访问的完整连接，以及实现所需的判断。
+
+#### 3. 在不损失功能的前提下改善回答速度
 
 ```text
-$synframe 创建一个按客户和币种汇总支付 CSV 的工具。
-请处理无效输入，并验证实际执行结果。
+$synframe 请评估不损失功能的优化机会，
+并只提取可实现的方案。
 ```
 
-无需预先指定技术名称、学习深度或搜索次数。当前安装针对 Codex skill 格式进行验证。自动选择取决于宿主配置，也可使用明确的 `$synframe` 调用。
+**讨论过的连接：** 检查重复查询、序列化及错误重试成本 → 排除削减学习、发现或验证的方案 → 考虑独立查询合并、准确返回对象复用及机器 JSON 精简 → 确认状态、证据与恢复责任保留。
 
-以上只是 README 使用示例，不会把特定领域、产品或预期答案作为运行契约中的固定要求。
+**用户得到的内容：** 区分可减少的机械成本与必须保留判断的可应用候选。
+
+无需预先指定技术名称、学习深度或搜索次数。自动选择取决于宿主配置，也可显式调用 `$synframe`。这些案例仅保留为 README 使用说明，不会加载为 skill 的运行条件。
 
 ### 恢复已保存的工作
 
