@@ -1,4 +1,4 @@
-# SynFrame
+# SynFrame — Knowledge Discovery & Understanding · Tool & Skill Composition · Solution Exploration
 
 **English** · [한국어](README.ko.md) · [简体中文](README.zh.md)
 
@@ -6,9 +6,11 @@
 ![Python](https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white)
 ![Runtime](https://img.shields.io/badge/runtime-standard%20library%20%2B%20SQLite-16a34a)
 
-**An AI skill that discovers missing knowledge, develops the understanding a goal needs, and combines tools and skills into executable solutions.**
+**An AI skill that connects the knowledge and tools you need and guides you toward an easier path to your desired result.**
 
-SynFrame is designed to let the AI determine what it needs to learn and how deeply. It derives capabilities and questions from your goal, discovers further questions while learning, and carries the results back into the original solution. Learning has no fixed tree depth; sufficiently answered branches must end.
+SynFrame starts from your goal to explore and explain **what knowledge you need, which tools and skills to use, and how to combine and apply them to reach your desired result more easily.**
+
+The AI researches and understands the necessary knowledge, evaluates tool and skill combinations, and connects them into executable solution paths. It pursues follow-up questions discovered during research and carries new knowledge back into the original goal and solution. Learning has no fixed tree depth; sufficiently answered branches must end.
 
 ## Features
 

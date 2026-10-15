@@ -1,4 +1,4 @@
-# SynFrame
+# SynFrame — 知识探索与理解 · 工具与 skill 的组合 · 解决方案探索
 
 [English](README.md) · [한국어](README.ko.md) · **简体中文**
 
@@ -6,9 +6,11 @@
 ![Python](https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white)
 ![Runtime](https://img.shields.io/badge/runtime-standard%20library%20%2B%20SQLite-16a34a)
 
-**一个发现所缺知识、确定所需理解深度，并组合工具和 skill 来形成可执行方案的 AI skill。**
+**一个连接所需知识与工具，引导用户更容易接近目标结果的 AI skill。**
 
-SynFrame 让 AI 自主判断需要学习什么、学到什么程度。它从用户目标推导所需能力与问题，在学习中发现后续探索空间，并将结果反馈到原始目标与解决方案。学习树没有预设深度；已有充分依据的分支必须结束。
+SynFrame 从用户目标出发，探索并说明**需要哪些知识、应该使用哪些工具和 skill，以及如何组合并应用它们，更容易获得期望的结果。**
+
+AI 会主动探索并理解必要知识，评估工具与 skill 的组合，将它们连接成可执行的解决路径。研究中发现的后续问题会继续探索，新知识会反馈到原始目标与解决方案。学习树没有预设深度；已有充分依据的分支必须结束。
 
 ## 主要功能
 
