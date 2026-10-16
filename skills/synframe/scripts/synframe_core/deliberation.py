@@ -174,10 +174,6 @@ def review_errors(goal, candidate, review, documents, resolve):
     assessments("goal_alignment", facets)
     caps = inputs['capabilities']
     assessments("capability_conditions", [d["id"] for d in caps])
-    covered = {c for d in caps if d["validity_status"] == "VALID"
-               for c in d.get("extensions", {}).get("criterion_ids", [])}
-    if covered != {c["id"] for c in goal["success_criteria"]}:
-        errors.append("goal success criteria lack capability derivation")
     # §25.3/27.6.10/17: independence does not erase selection impact. Do not
     # require every unused-asset question to close; require a scoped assessment.
     independent = inputs['independent_followups']
@@ -238,6 +234,27 @@ def review_errors(goal, candidate, review, documents, resolve):
                     and action["action"] in ACTIONS and all(type(action[k]) is str and action[k].strip()
                     for k in ("expected_improvement", "cost", "rationale"))):
                 errors.append("invalid marginal search alternative")
+    return errors
+
+
+def review_subject_errors(goal, candidate, documents, resolve):
+    """Existing Gate subject checks, available before a Review is authored.
+
+    Presence and declared coverage are structural facts, not an assessment of
+    adequate decomposition, contextual understanding or the truth of evidence.
+    Both the read-only context and Gate call this same check on current records.
+    """
+    errors = []
+    capabilities = review_inputs(goal, candidate, documents)['capabilities']
+    covered = {criterion for capability in capabilities
+               if capability['validity_status'] == 'VALID'
+               for criterion in capability.get('extensions', {}).get('criterion_ids', [])}
+    if covered != {criterion['id'] for criterion in goal['success_criteria']}:
+        errors.append('goal success criteria lack capability derivation')
+    for pointer in candidate['asset_refs']:
+        asset = resolve(pointer)
+        if not asset['understanding']:
+            errors.append('no contextual understanding assessment: ' + asset['id'])
     return errors
 
 

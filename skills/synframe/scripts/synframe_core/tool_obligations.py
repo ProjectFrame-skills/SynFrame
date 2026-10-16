@@ -142,16 +142,29 @@ def validate_identity(task, goal, resolve):
                     'final composition cannot omit unfinished discovery; work may interleave before closure')
 
 
-def observation_binding(task, operations, resolve):
+def observation_binding(task, operations, resolve, *, raise_on_missing=False):
     """Require actual-search ability evidence to reach preserved raw observations.
 
     File/hash/operation bindings prove recorded work, never relevance or truth.
     EvidenceRecord.source is the actual receipt path or its original source.
     """
-    ability = next((a for a in task['understanding']['abilities'] if a['id'] == 'discovery.actual_search'), None)
-    if not ability or ability['status'] != 'MET':
+    ability_id = 'discovery.actual_search'
+    ability = next((a for a in task['understanding']['abilities'] if a['id'] == ability_id), None)
+    details = {'task_ref':reference(task), 'ability_id':ability_id,
+        'evidence_sources':[], 'allowed_observations':[], 'eligible_operation_refs':[],
+        'source_rule':'EvidenceRecord.source must exactly equal a valid preserved receipt.path or receipt.source; extensions.observation_file is not a binding.'}
+
+    def missing(reason):
+        if raise_on_missing:
+            raise ContractError('tool discovery has no preserved actual-search observation binding: '
+                + task['id'] + '@' + str(task['revision']) + ' / ' + ability_id + '; ' + reason,
+                details={**details, 'reason':reason})
         return False
+
+    if not ability or ability['status'] != 'MET':
+        return missing('required ability is absent or not MET')
     evidence = [resolve(p) for p in ability['evidence_refs']]
+    details['evidence_sources'] = [{'evidence_ref':reference(e), 'source':e['source']} for e in evidence]
     allowed_tasks = {task['id']}
     queue = [task]
     while queue:
@@ -168,13 +181,19 @@ def observation_binding(task, operations, resolve):
         selected = operation['intent'].get('learning_task_refs', [])
         if not any(p['id'] in allowed_tasks for p in selected):
             continue
+        details['eligible_operation_refs'].append(reference(operation))
         for receipt in operation['extensions'].get('actual_observations', []):
             path = Path(receipt['path'])
-            if not path.is_file() or file_sha256(path) != receipt['sha256']:
+            file_status = ('missing' if not path.is_file() else
+                'matching' if file_sha256(path) == receipt['sha256'] else 'hash_mismatch')
+            details['allowed_observations'].append({'operation_ref':reference(operation),
+                'path':receipt['path'], 'source':receipt['source'],
+                'sha256':receipt['sha256'], 'file_status':file_status})
+            if file_status != 'matching':
                 continue
             if any(e['source'] in {receipt['source'], receipt['path']} for e in evidence):
                 return True
-    return False
+    return missing('no ability evidence source matches a valid receipt from an eligible successful discovery operation')
 
 
 def gate_errors(goal, documents, operations, resolve):
@@ -207,7 +226,7 @@ def gate_errors(goal, documents, operations, resolve):
             if role != 'scope':
                 require(actual['closure_assessment']['verdict'] == 'ANSWERED', 'applicable tool duty cannot close as nonapplicable')
             if role == 'discovery':
-                require(observation_binding(actual, operations, resolve), 'tool discovery has no preserved actual-search observation binding')
+                observation_binding(actual, operations, resolve, raise_on_missing=True)
             if role == 'composition':
                 require(composition_binding(actual, operations), 'tool composition has no actual current assessment operation')
         except (ContractError, KeyError, TypeError, ValueError) as exc:

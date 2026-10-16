@@ -212,7 +212,7 @@ def validate(doc, *, patch=False):
     elif kind == "Frame":
         require(doc["transformation"] in FRAME_AXES, "invalid Frame axis")
         require(doc["structural_difference"].get("rationale"), "Frame requires meaningful difference rationale")
-        require(doc["information_requirements"], "Frame requires information needs")
+        require(doc["information_requirements"], "Frame requires information needs: information_requirements must contain actual canonical LearningTask refs. Connect existing relevant questions or explicitly register needed questions; later scope registration does not fill this field.")
     elif kind == "Capability":
         require(doc["origin"] in RECORD_ENUMS['Capability.origin'], "capability origin must remain explicit/inferred")
     elif kind == "EvidenceRecord":
@@ -308,7 +308,30 @@ def validate_result_shape(result):
         require(type(record["answer_refs"]) is list, "learning answer_refs must be a list of EvidenceRecord refs")
         for pointer in record["answer_refs"]:
             ref(pointer)
+        task = next((change for change in result['proposed_state_changes']
+            if change.get('type') == 'LearningTask' and change['id'] == record['result_ref']['id']), None)
+        if task is not None:
+            validate_discovery_ids(record, task, f'learning_results[{i}].discovery_ids')
     return result
+
+
+def validate_discovery_ids(record, task, field):
+    """Compare declared IDs with the complete resulting task, never fill them."""
+    supplied = record['discovery_ids']
+    require(type(supplied) is list and all(type(item) is str and item for item in supplied),
+            field + ' must be an explicit list of stable discovery ID strings')
+    expected = {item['id'] for item in task['expansion']['discoveries']}
+    actual = set(supplied)
+    if actual != expected:
+        details = {'field':field, 'task_ref':record['result_ref'],
+            'expected_ids':sorted(expected), 'missing_ids':sorted(expected-actual),
+            'unexpected_ids':sorted(actual-expected)}
+        raise ContractError(f"{field} for {task['id']}@{record['result_ref']['revision']}: "
+            f"result discovery evaluation omitted items or contains unexpected IDs; "
+            f"expected={details['expected_ids']}, missing={details['missing_ids']}, "
+            f"unexpected={details['unexpected_ids']}. Include all retained and new discoveries "
+            "in the resulting expansion, after assessing their current disposition; IDs are not auto-filled.",
+            details=details)
 
 
 def validate_decision(decision):
@@ -351,6 +374,18 @@ def validate_completion(verification, goal):
 def schema_catalog(entity=None, *, command=None):
     require(entity is None or command is None, 'select entity OR command')
     if command is not None:
+        if command == 'work-context':
+            return {'command':'work-context','options':{'run':'run_id','operation':'optional saved operation ID',
+                    'document_ids':'optional explicit distinct current entity IDs'},
+                'output':{'revision':'observed run revision','state_digest':'exact observed digest',
+                    'selected_tasks':[{'requested_ref':'selected saved ref','current':'full current LearningTask or null',
+                        'reference_current':'bool comparing requested_ref to current; not semantic approval'}],
+                    'consumers':[{'declared_ref':'declared saved ref','current':'full current entity or null',
+                        'reference_current':'bool comparing declared_ref to current'}],
+                    'assets':'list:projections with asset_ref, not full entities',
+                    'candidates':'list:projections with candidate_ref, not full entities',
+                    'documents':'list:full current entities in requested order, only when document_ids was provided; not an ID-keyed dictionary'},
+                'scope':'Output shape guide only; inspect actual current response. Do not treat wrapper entries as entities, automatically refresh refs, or approve judgments.'}
         require(command == 'transition', 'unknown command contract')
         return {'command':'transition','options':{'run':'run_id','expected':'observed run revision'},
             'input':{'target':sorted(STATES),'reason':'nonempty host-authored str',
@@ -368,6 +403,7 @@ def schema_catalog(entity=None, *, command=None):
     from .goal_interpretation import REQUIREMENTS as INTERPRETATION_REQUIREMENTS
     structures = {
         'Frame.structural_difference': {'rationale':'nonempty host-authored difference rationale'},
+        'Frame.information_requirements': 'nonempty list: exact canonical LearningTask refs; connect actual relevant questions now, not an empty placeholder for later scope registration. Do not invent questions to satisfy the format.',
         'GoalSpec.success_criteria[]': {'id': 'str', 'description': 'str'},
         'GoalSpec.explicit_constraints[]': {'id': 'str', 'description': 'str', 'predicate': 'dict|null'},
         'Capability.inputs[]': {'name': 'str', 'type': 'str'},
@@ -379,9 +415,15 @@ def schema_catalog(entity=None, *, command=None):
         'SolutionCandidate.connections[]': {'from_ref': 'ref', 'output': 'str', 'to_ref': 'ref',
             'input': 'str', 'evidence_refs': 'list:EvidenceRecord ref'},
         'LearningTask.answer.claims[]': {'id': 'str', 'text': 'str', 'evidence_refs': 'list:EvidenceRecord ref',
-            'source_locator': 'str', 'conditions': 'list', 'inference': 'bool'},
+            'source_locator': 'str', 'conditions': 'list', 'inference': 'bool; true marks a conclusion inferred from observations, not a measured fact'},
+        'EvidenceRecord.source': 'str; for preserved observation bindings, exactly use the actual receipt.path or receipt.source returned by preserve_files/observe-result. Keep the original URL and read location in the claim source_locator or explicitly authored extensions. An arbitrary extensions.observation_file does not bind evidence to a receipt. This identity check does not establish claim truth.',
+        'EvidenceRecord.observation_kind': {
+            'measured': 'Directly observed fact in its actual scope; recording a comparison does not measure the truth of its conclusion',
+            'external_claim': 'Statement from an external source, with actual source location and applicability scope',
+            'inference': 'Host interpretation derived from actual observations; preserve those grounds and scope',
+            'unknown': 'Not established; not a verified fact'},
         'LearningTask.expansion.discoveries[]': {**dict.fromkeys(sorted(DISCOVERY_FIELDS), 'str'),
-            'disposition': 'str|null', 'target_refs': 'list:ref'},
+            'disposition': 'str|null', 'target_refs': 'list:ref; CREATE_TASK/PREREQUISITE/REUSE require nonempty canonical LearningTask refs, not consumer candidates/capabilities. UPDATE with understanding_gap must include an OPEN/DEFERRED LearningTask. Keep actual consumer effects in their own processing/propagation records.'},
         'LearningTask.understanding.abilities[]': {'id': 'str', 'status': 'MET|UNMET|UNKNOWN',
             'evidence_refs': 'list:EvidenceRecord ref', 'rationale': 'str'},
         'LearningTask.extensions.interpretation_review': {
@@ -414,7 +456,8 @@ def schema_catalog(entity=None, *, command=None):
             'operation_id': 'str', 'outcome': 'SUCCEEDED|FAILED|UNKNOWN'},
         'OperationRecord.result.learning_results[]': {**dict.fromkeys(sorted(LEARNING_RESULT_FIELDS), 'host-authored value'),
             'task_ref': 'input LearningTask ref', 'result_ref': 'changed LearningTask ref',
-            'answer_refs': 'list:EvidenceRecord ref, not claim/item refs'},
+            'answer_refs': 'list:EvidenceRecord ref, not claim/item refs',
+            'discovery_ids': 'list:str stable IDs of ALL discoveries retained or added in the resulting LearningTask.expansion.discoveries, not only new discoveries from this operation. Assess current dispositions explicitly; no automatic evaluation or filling.'},
     }
     enums = {k: sorted(v) for k, v in RECORD_ENUMS.items()}
     enums.update({'LearningTask.' + field + '.status': sorted(values) for field, values in AXES.items()})

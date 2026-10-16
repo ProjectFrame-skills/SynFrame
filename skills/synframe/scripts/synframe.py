@@ -35,13 +35,16 @@ def main(argv=None):
     schema = commands.add_parser("schema", help="show entity fields, enums and nested shapes")
     schema.add_argument('--entity', help='show only the requested entity serialization contract')
     schema.add_argument('--entities', nargs='+', help='explicit independent entity contracts in one response')
-    schema.add_argument('--for-command', '--command', dest='schema_command', help='show command input contract (transition)')
+    schema.add_argument('--for-command', '--command', dest='schema_command', help='show command I/O contract (transition or work-context)')
     contract = commands.add_parser('read-contract', help='manifest or bounded exact bundled contract text; no reading/sufficiency judgment')
     contract.add_argument('--name')
     contract.add_argument('--offset', type=int, default=0)
     contract.add_argument('--limit', type=int, default=6000)
     contract.add_argument('--expected-sha')
     contract.add_argument('--retained', help='JSON file of host-declared ranges actually retained in current context')
+    contracts = commands.add_parser('read-contracts', help='read explicit exact contract ranges within a serialized byte budget; no reading judgment')
+    contracts.add_argument('--input', required=True, help='JSON ranges/optional current-context retained declaration; file or - for stdin')
+    contracts.add_argument('--max-bytes', required=True, type=int, help='compact JSON response bytes including newline; host must budget outer envelope/tokens separately')
     learning_basis = commands.add_parser("learning-basis", help="hash current task closure basis; no adequacy judgment")
     learning_basis.add_argument("--input", required=True)
     compare = commands.add_parser("compare", help="compare only known numeric Pareto dimensions")
@@ -67,6 +70,7 @@ def main(argv=None):
             sub.add_argument("--operation", required=True)
         if name == 'work-context':
             sub.add_argument('--operation')
+            sub.add_argument('--document-ids', nargs='+', help='explicit full current documents from the same readonly snapshot')
         if name in {"snapshot", "gate", "review-context"}:
             sub.add_argument("--candidate", type=pointer, required=True)
         if name == "gate":
@@ -89,6 +93,11 @@ def main(argv=None):
             from synframe_host import read_contract
             output = read_contract(Path(__file__).resolve().parents[1],args.name,args.offset,args.limit,args.expected_sha,
                 retained=read_json(args.retained) if args.retained else None)
+        elif args.command == 'read-contracts':
+            from synframe_core.transport import read_contracts, encode_bundle
+            output = read_contracts(Path(__file__).resolve().parents[1], read_json(args.input), args.max_bytes)
+            sys.stdout.buffer.write(encode_bundle(output).encode('utf-8'))
+            return 0
         elif args.command == "learning-basis":
             from synframe_core.learning import basis
             output = {"basis": basis(read_json(args.input)), "semantic_scope": "content hash only; host assesses sufficiency"}
@@ -124,7 +133,7 @@ def main(argv=None):
             elif command == 'review-context':
                 output = core.review_context(args.run, args.candidate)
             elif command == 'work-context':
-                output = core.work_context(args.run, args.operation)
+                output = core.work_context(args.run, args.operation, document_ids=args.document_ids)
             elif command == "resume":
                 output = core.resume(args.run, args.expected, **payload) if payload else core.restore(args.run)
             elif command == "result":

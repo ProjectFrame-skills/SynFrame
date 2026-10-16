@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills" / "synframe" / "scripts"
@@ -764,9 +765,148 @@ class CoreAcceptance(unittest.TestCase):
         self.assertEqual(self.core.transition(self.run_id, "COMPLETED", self.revision(), "Artifact inspected",
             verification={"usable": {"status": "PASS", "evidence_refs": [r("ev")], "rationale": "Actual output inspected"}}, package_ref=r("package", 2))["state"], "COMPLETED")
 
+    def test_execute_requires_actual_adoption_not_only_a_ready_review(self):
+        self.base(); self.review()
+        self.assertTrue(self.core.commit_gate(self.run_id, r("candidate"), r("review"))["passed"])
+        before = self.revision()
+        operations = self.core.db.execute("SELECT COUNT(*) FROM operations").fetchone()[0]
+        decisions = [d for d in self.core.documents(self.run_id) if d["type"] == "DecisionRecord"]
+        with self.assertRaisesRegex(ContractError, "EXECUTE needs a current committed"):
+            self.core.begin(self.run_id, self.request("EXECUTE", {
+                "candidate_ref": r("candidate"), "review_ref": r("review"), "task": "Generate requested result"}))
+        self.assertEqual(self.revision(), before)
+        self.assertEqual(self.core.db.execute("SELECT COUNT(*) FROM operations").fetchone()[0], operations)
+        self.assertEqual([d for d in self.core.documents(self.run_id) if d["type"] == "DecisionRecord"], decisions)
+        rejected = self.core.explain(self.run_id)["events"][-1]
+        self.assertEqual(rejected["kind"], "REJECTED_INTENT")
+        self.assertEqual(rejected["data"]["action"], "EXECUTE")
+        self.commit()
+        self.assertFalse(any(d["type"] == "SolutionPackage" for d in self.core.documents(self.run_id)))
+        op = self.core.begin(self.run_id, self.request("EXECUTE", {
+            "candidate_ref": r("candidate"), "review_ref": r("review"), "task": "Generate requested result"}))
+        self.assertEqual(op["action"], "EXECUTE")
+
+    def test_execute_rejects_changed_adopted_candidate(self):
+        self.base(); self.review(); self.commit()
+        self.put([candidate(comparison_rationale="Changed route requires current adoption")])
+        with self.assertRaisesRegex(ContractError, "EXECUTE adoption rejected:.*stale reference"):
+            self.core.begin(self.run_id, self.request("EXECUTE", {"task": "Generate requested result"}))
+
+    def test_execute_rejects_changed_adopted_review(self):
+        self.base(); self.review(); self.commit()
+        self.review()
+        self.assertTrue(self.core.commit_gate(self.run_id, r("candidate"), r("review", 2))["passed"])
+        with self.assertRaisesRegex(ContractError, "EXECUTE adoption rejected:.*stale reference"):
+            self.core.begin(self.run_id, self.request("EXECUTE", {"task": "Generate requested result"}))
+
+    def test_execute_rechecks_gate_when_adopted_refs_stay_current(self):
+        self.base(); self.review(); self.commit()
+        self.put([frame("new-frame", information_requirements=[question("new-material-gap", "OPEN")])], "GENERATE_FRAME")
+        self.assertEqual(self.core.resolve(self.run_id, r("candidate"))["revision"], 1)
+        self.assertEqual(self.core.resolve(self.run_id, r("review"))["revision"], 1)
+        self.assertFalse(self.core.commit_gate(self.run_id, r("candidate"), r("review"))["passed"])
+        with self.assertRaisesRegex(ContractError, "EXECUTE adoption rejected"):
+            self.core.begin(self.run_id, self.request("EXECUTE", {"task": "Generate requested result"}))
+
+    def test_execute_cannot_name_a_different_current_route_than_the_adoption(self):
+        self.base(); self.review(); self.commit()
+        self.put([candidate(id="other-candidate")])
+        self.review(identity="other-review")
+        self.assertTrue(self.core.commit_gate(self.run_id, r("candidate"), r("review"))["passed"])
+        for key, pointer in (("candidate_ref", r("other-candidate")), ("review_ref", r("other-review"))):
+            with self.subTest(key=key), self.assertRaisesRegex(ContractError, "differs from the committed solution"):
+                self.core.begin(self.run_id, self.request("EXECUTE", {key: pointer, "task": "Generate requested result"}))
+
+    def test_pre_adoption_reasoning_can_preserve_an_actual_probe_artifact(self):
+        self.assertIsNone(self.core.work_context(self.run_id)["adoption"]["committed_candidate_ref"])
+        op = self.core.begin(self.run_id, self.request("DERIVE_CAPABILITY", {
+            "task": "Probe the local output capability before selecting a solution"}))
+        p = Path(self.temp.name) / "capability-probe.txt"; p.write_text("Observed prototype output")
+        artifact = {"path": str(p), "sha256": hashlib.sha256(p.read_bytes()).hexdigest(), "source": "Capability probe"}
+        self.core.record_observation(self.run_id, op["id"], self.revision(), [artifact])
+        pending = self.core.restore(self.run_id)["status"]["pending_operations"][0]
+        self.assertEqual(pending["action"], "DERIVE_CAPABILITY")
+        self.assertEqual(pending["extensions"]["actual_observations"], [artifact])
+        self.assertFalse(pending["result"])
+        self.assertIsNone(self.core.work_context(self.run_id)["adoption"]["committed_candidate_ref"])
+
+    def test_future_evidence_b3_time_pair_rejected_atomically_with_pending_observation(self):
+        # Exact B3 observed_at/core-time pair in a new isolated structural
+        # fixture, not a replay or modification of the original B3 run.
+        op = self.core.begin(self.run_id, self.request())
+        source = Path(self.temp.name) / "scope-observation.json"
+        source.write_text('{"observed_at":"2026-10-16T08:24:00+00:00"}')
+        artifact = {"path": str(source), "sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                    "source": "Original future-time fixture input, not a corrected observation"}
+        self.core.record_observation(self.run_id, op["id"], self.revision(), [artifact])
+        result = output(op, [evidence("earlier-patch"), evidence("future",
+            source=str(source), observed_at="2026-10-16T08:24:00+00:00")])
+        original_result = copy.deepcopy(result)
+        before = self.core.restore(self.run_id)
+        for mode in ("apply", "preflight"):
+            with self.subTest(mode=mode), patch("synframe_core.store.now",
+                    return_value="2026-10-16T08:23:28.478168+00:00"):
+                with self.assertRaisesRegex(ContractError, "future.*observed_at is later"):
+                    if mode == "apply":
+                        self.core.apply(self.run_id, op["id"], result)
+                    else:
+                        self.core.preflight(self.run_id, op["id"], result)
+            self.assertEqual(self.core.restore(self.run_id), before)
+            self.assertEqual(result, original_result)
+            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), artifact["sha256"])
+        self.assertFalse(self.core.get(self.run_id, op["id"])["applied"])
+        self.assertEqual(self.core.get(self.run_id, op["id"])["extensions"]["actual_observations"], [artifact])
+        self.assertFalse(any(d["id"] in {"future", "earlier-patch"} for d in self.core.documents(self.run_id)))
+
+    def test_evidence_time_keeps_past_same_instant_and_unqualified_representations(self):
+        values = ["2026-10-12T00:00:00Z", "2026-10-16T08:23:28.478168Z",
+                  "2026-10-16T10:23:28.478168+02:00", "2026-10-16T03:23:28.478168-05:00",
+                  "unknown", "2026-10-17T08:24:00", "between collection and assessment"]
+        op = self.core.begin(self.run_id, self.request())
+        result = output(op, [evidence("time-" + str(i), observed_at=value) for i,value in enumerate(values)])
+        with patch("synframe_core.store.now", return_value="2026-10-16T08:23:28.478168+00:00"):
+            check = self.core.preflight(self.run_id, op["id"], result)
+            self.assertTrue(check["validated"])
+            self.assertFalse(self.core.get(self.run_id, op["id"])["applied"])
+            self.core.apply(self.run_id, op["id"], check["prepared_result"])
+        for i,value in enumerate(values):
+            self.assertEqual(self.core.get(self.run_id, "time-" + str(i))["observed_at"], value)
+
+    def test_existing_error_history_can_be_read_and_restored_without_wallclock_judgment(self):
+        # Simulate a pre-guard stored error only inside this current-identity
+        # fixture. Real old runs still require their matching preserved package.
+        with patch("synframe_core.store._validate_evidence_time"), patch("synframe_core.store.now",
+                return_value="2026-10-16T08:23:28.478168+00:00"):
+            self.put([evidence("historical-error", observed_at="2026-10-16T08:24:00+00:00")])
+        original = self.core.get(self.run_id, "historical-error")
+        with patch("synframe_core.store.now", side_effect=AssertionError("read must not obtain a new clock")):
+            self.assertEqual(self.core.get(self.run_id, "historical-error"), original)
+            restored = self.core.restore(self.run_id)
+            observed = self.core.work_context(self.run_id)
+        self.assertIn(original, restored["snapshot"]["documents"])
+        self.assertEqual(observed["revision"], self.revision())
+
+    def test_execute_exact_idempotent_reuse_returns_saved_result_after_gate_changes(self):
+        self.base(); self.review(); self.commit()
+        request = self.request("EXECUTE", {"task": "Generate requested result"}, key="adopted-execution")
+        op = self.core.begin(self.run_id, request)
+        self.core.apply(self.run_id, op["id"], self.core.prepare(self.run_id, op["id"], output(op)))
+        self.put([frame("later-frame", information_requirements=[question("later-material-gap", "OPEN")])], "GENERATE_FRAME")
+        self.assertFalse(self.core.commit_gate(self.run_id, r("candidate"), r("review"))["passed"])
+        before = self.revision()
+        operations = self.core.db.execute("SELECT COUNT(*) FROM operations").fetchone()[0]
+        reused = self.core.begin(self.run_id, request)
+        self.assertEqual(reused["id"], op["id"])
+        self.assertTrue(reused["applied"])
+        self.assertEqual(reused["result"]["outcome"], "SUCCEEDED")
+        self.assertEqual(self.revision(), before)
+        self.assertEqual(self.core.db.execute("SELECT COUNT(*) FROM operations").fetchone()[0], operations)
+        with self.assertRaisesRegex(ContractError, "EXECUTE adoption rejected"):
+            self.core.begin(self.run_id, self.request("EXECUTE", {"task": "New execution after gate changed"}))
+
     def test_checkpoint_restore_pending_and_completed_work(self):
         self.base()
-        op = self.core.begin(self.run_id, self.request("EXECUTE", {"task": "external change"}))
+        op = self.core.begin(self.run_id, self.request("EXPAND_COMPOSITION", {"task": "Observe composition change"}))
         before = self.core.restore(self.run_id)
         self.core.close(); self.core = Core(self.path)
         after = self.core.restore(self.run_id)
@@ -789,7 +929,7 @@ class CoreAcceptance(unittest.TestCase):
 
     def test_unknown_external_effect_needs_inspection_not_reexecution(self):
         self.put([evidence()])
-        op = self.core.begin(self.run_id, self.request("EXECUTE", {"task": "external side effect"}))
+        op = self.core.begin(self.run_id, self.request("DERIVE_CAPABILITY", {"task": "External capability probe effect"}))
         self.core.apply(self.run_id, op["id"], output(op, outcome="UNKNOWN"))
         self.assertEqual(len(self.core.status(self.run_id)["pending_operations"]), 1)
         self.core.reconcile(self.run_id, op["id"], self.revision(), [r("ev")], "effects_inspected", "Actual remote state inspected")
@@ -797,7 +937,7 @@ class CoreAcceptance(unittest.TestCase):
 
     def test_stale_pending_result_must_be_reconciled(self):
         self.put([evidence()])
-        op = self.core.begin(self.run_id, self.request("EXECUTE", {"task": "pending"}))
+        op = self.core.begin(self.run_id, self.request("DERIVE_CAPABILITY", {"task": "Pending capability probe"}))
         self.put([evidence("inspection")], "RECOVERY_INSPECT")
         with self.assertRaisesRegex(ContractError, "revision conflict"):
             self.core.apply(self.run_id, op["id"], output(op))
@@ -805,16 +945,16 @@ class CoreAcceptance(unittest.TestCase):
         self.assertFalse(self.core.status(self.run_id)["pending_operations"])
 
     def test_retry_identical_failure_requires_new_evidence(self):
-        op = self.core.begin(self.run_id, self.request("EXECUTE", {"task": "probe"}))
+        op = self.core.begin(self.run_id, self.request("DERIVE_CAPABILITY", {"task": "Capability probe"}))
         failed = output(op, outcome="FAILED"); failed["unresolved_items"] = ["Temporary probe condition unresolved"]
         self.core.apply(self.run_id, op["id"], failed)
         self.assertEqual(len(self.core.status(self.run_id)["unresolved_items"]), 1)
         with self.assertRaisesRegex(ContractError, "retry evidence"):
-            self.core.begin(self.run_id, self.request("EXECUTE", {"task": "probe"}))
+            self.core.begin(self.run_id, self.request("DERIVE_CAPABILITY", {"task": "Capability probe"}))
         self.put([evidence("retry", claim="Temporary failure cleared")], "RECOVERY_INSPECT")
-        request = self.request("EXECUTE", {"task": "probe", "retry_evidence_refs": [r("retry")]})
+        request = self.request("DERIVE_CAPABILITY", {"task": "Capability probe", "retry_evidence_refs": [r("retry")]})
         retried = self.core.begin(self.run_id, request)
-        self.assertEqual(retried["action"], "EXECUTE")
+        self.assertEqual(retried["action"], "DERIVE_CAPABILITY")
         self.core.apply(self.run_id, retried["id"], output(retried))
         self.assertFalse(self.core.status(self.run_id)["unresolved_items"])
         self.assertTrue(any(e["data"].get("outcome") == "FAILED" for e in self.core.explain(self.run_id)["events"]))

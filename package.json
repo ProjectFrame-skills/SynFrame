@@ -1,6 +1,6 @@
 {
   "name": "synframe-cli",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Discover knowledge, compose tools and skills, and explore executable solutions. Install the SynFrame skill for Codex.",
   "type": "module",
   "bin": {

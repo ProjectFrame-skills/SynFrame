@@ -10,9 +10,10 @@ import subprocess
 import sys
 import uuid
 from copy import deepcopy
+from html import escape
 from pathlib import Path
 
-from synframe_core.schema import META, ports, validate_result_shape, validate_completion, ref
+from synframe_core.schema import META, PACKAGE_FIELDS, ports, validate_result_shape, validate_completion, ref
 from synframe_core.files import file_sha256
 
 
@@ -98,8 +99,15 @@ class HostIO:
         self.cli = Path(__file__).with_name("synframe.py")
 
     def call(self, command, payload=None, **options):
+        if 'input' in options:
+            if not isinstance(options['input'], (str, Path)):
+                raise ValueError('HostIO.call input= requires a CLI JSON file path or "-", not '
+                    + type(options['input']).__name__
+                    + '; pass structured JSON as payload=... or the second positional argument')
+            if payload is not None:
+                raise ValueError('HostIO.call requires either structured payload or input= file path, not both')
         args = [sys.executable, str(self.cli), "--state", self.state, '--compact', command]
-        if self.run_id is not None and command not in {'schema', 'learning-basis', 'compare', 'artifact', 'solve', 'read-contract'}:
+        if self.run_id is not None and command not in {'schema', 'learning-basis', 'compare', 'artifact', 'solve', 'read-contract', 'read-contracts'}:
             args += ["--run", self.run_id]
         if command == 'artifact' and 'path' in options:
             args.append(str(options.pop('path')))
@@ -174,6 +182,58 @@ class HostIO:
         return self.preserve_observation(operation, artifacts, expected_revision=expected_revision)
 
     @staticmethod
+    def write_package(contents, *, path, format, source):
+        """Render every explicitly authored package value; no judgments or state writes.
+
+        This exclusive-create artifact receipt does not adopt or complete a run.
+        The host chooses an authorized path, actual source and explicit format.
+        """
+        if type(contents) is not dict or set(contents) != PACKAGE_FIELDS:
+            raise ValueError('write_package needs all ten explicitly authored SolutionPackage.contents fields')
+        if format not in {'html', 'json'} or type(source) is not str or not source.strip():
+            raise ValueError('write_package needs an explicit html/json format and nonempty source')
+        if not isinstance(path, (str, Path)) or not str(path).strip():
+            raise ValueError('write_package needs an explicit output file path')
+
+        def validate(value):
+            if type(value) is dict:
+                if any(type(key) is not str for key in value):
+                    raise ValueError('package JSON object keys must be strings')
+                for item in value.values(): validate(item)
+            elif type(value) is list:
+                for item in value: validate(item)
+            elif value is not None and type(value) not in {str, int, float, bool}:
+                raise ValueError('package values must be JSON objects, lists, strings, numbers, booleans or null')
+        validate(contents)
+        serialized = json.dumps(contents, ensure_ascii=False, allow_nan=False, indent=2) + '\n'
+
+        def render(value):
+            if type(value) is dict:
+                return '<dl>' + ''.join('<dt>' + escape(key) + '</dt><dd>' + render(item)
+                    + '</dd>' for key, item in value.items()) + '</dl>'
+            if type(value) is list:
+                return '<ul>' + ''.join('<li>' + render(item) + '</li>' for item in value) + '</ul>'
+            kind = 'string' if type(value) is str else 'null' if value is None else 'boolean' if type(value) is bool else 'number'
+            return '<pre data-json-type="' + kind + '">' + escape(value if type(value) is str else
+                json.dumps(value, ensure_ascii=False, allow_nan=False)) + '</pre>'
+
+        output = serialized if format == 'json' else (
+            '<!doctype html><html><head><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1">'
+            '<title>SynFrame Solution Package</title><style>'
+            'body{font:16px/1.6 system-ui,sans-serif;max-width:70rem;margin:auto;padding:2rem}'
+            'dt{font-weight:700;margin-top:1rem}dd{margin-left:1rem}'
+            'pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}'
+            '</style></head><body>' + render(contents) + '</body></html>\n')
+        destination = Path(path).expanduser().resolve()
+        if destination.is_relative_to(Path(__file__).resolve().parents[1]):
+            raise ValueError('package artifacts must be outside the installed skill')
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with destination.open('x', encoding='utf-8') as stream:
+            stream.write(output)
+        return {'path':str(destination), 'sha256':file_sha256(destination), 'source':source}
+
+    @staticmethod
     def edit(document, **changes):
         """Copy a saved record into patch form without mutating its nested data.
 
@@ -185,6 +245,57 @@ class HostIO:
     @staticmethod
     def reference(document):
         return {'id': document['id'], 'revision': document['revision']}
+
+    @staticmethod
+    def edit_fields(document, *, expected_ref, replacements, removals):
+        """Apply explicit dictionary-key edits to an exact retained document.
+
+        Lists are whole values: no index edits, implicit merge or reference
+        refresh. This serializes changes, not their semantic adequacy. A caller
+        must still compare the base with current state before applying it.
+        """
+        ref(expected_ref)
+        if HostIO.reference(document) != expected_ref:
+            raise ValueError('field edits require the exact retained base reference')
+        if type(replacements) is not list or type(removals) is not list:
+            raise ValueError('field edits need explicit replacement and removal lists')
+        paths = []
+        for item in replacements:
+            if type(item) is not dict or set(item) != {'path', 'value'}:
+                raise ValueError('replacement needs exactly path/value')
+            paths.append(item['path'])
+        paths += removals
+        reserved = META - {'provenance', 'validity_status'}
+        for path in paths:
+            if (type(path) is not list or not path
+                    or any(type(key) is not str or not key for key in path)
+                    or path[0] in reserved):
+                raise ValueError('edit path needs dictionary keys and cannot change core metadata or identity')
+        for i, path in enumerate(paths):
+            if any(path[:len(other)] == other or other[:len(path)] == path for other in paths[:i]):
+                raise ValueError('duplicate or overlapping edit paths')
+        result = HostIO.edit(document)
+        for path in paths:
+            parent = result
+            for key in path[:-1]:
+                if type(parent) is not dict or key not in parent:
+                    raise ValueError('edit parent does not exist')
+                parent = parent[key]
+            if type(parent) is not dict:
+                raise ValueError('edit paths cannot traverse lists or scalar values')
+        for item in replacements:
+            parent = result
+            for key in item['path'][:-1]:
+                parent = parent[key]
+            parent[item['path'][-1]] = deepcopy(item['value'])
+        for path in removals:
+            parent = result
+            for key in path[:-1]:
+                parent = parent[key]
+            if path[-1] not in parent:
+                raise ValueError('removal target does not exist')
+            del parent[path[-1]]
+        return result
 
     def patch_refs(self, changes):
         return self.call('patch-refs', changes)
@@ -224,8 +335,11 @@ class HostIO:
     def preflight(self, operation, result):
         return self.call('preflight', result, operation=operation['id'])
 
-    def work_context(self, operation=None):
-        return self.call('work-context', **({'operation':operation['id']} if operation else {}))
+    def work_context(self, operation=None, *, document_ids=None):
+        options = {'operation':operation['id']} if operation else {}
+        if document_ids is not None:
+            options['document_ids'] = document_ids
+        return self.call('work-context', **options)
 
     @staticmethod
     def result_ref(applied_result, identity):
@@ -255,7 +369,8 @@ class HostIO:
 
     def build_result(self, operation, changes, *, result_ids, preserved_refs,
                      evidence_refs, unresolved_items, observed_effects, next_decision_inputs,
-                     outcome, learning_results, propagation_resolutions, path_assessments):
+                     outcome, learning_results, propagation_resolutions, path_assessments,
+                     expected_revision=None):
         """Serialize host decisions; do not default answers, feedback or success.
 
         Only explicitly requested changed IDs get projected result versions.
@@ -264,7 +379,10 @@ class HostIO:
         unchanged. Inspect resolved content and finalize closure basis afterward.
         This method does not apply anything; call finish then inspect work_context.
         """
-        projected = self.patch_refs(changes)['refs']
+        projection = self.patch_refs(changes)
+        if expected_revision is not None and projection['observed_revision'] != expected_revision:
+            raise ValueError('result projection changed after the host observation; reassess without automatic rebasing')
+        projected = projection['refs']
         if len(set(result_ids)) != len(result_ids) or any(i not in projected for i in result_ids):
             raise ValueError('result_ids must identify explicit distinct patch records')
         result = {'operation_id':operation['id'], 'proposed_state_changes':changes,

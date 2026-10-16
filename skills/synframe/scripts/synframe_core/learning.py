@@ -253,7 +253,10 @@ def validate_state(task, resolve, previous=None, goal=None, discovery_resolve=No
         # required proof dependencies below still resolve exact revisions.
         targets = [(discovery_resolve or resolve)(p) for p in discovery["target_refs"]]
         if discovery["disposition"] in {"CREATE_TASK", "PREREQUISITE", "REUSE"}:
-            require(targets and all(t["type"] == "LearningTask" for t in targets), "discovery continuation/reuse needs canonical tasks")
+            require(targets and all(t["type"] == "LearningTask" for t in targets),
+                    f"discovery continuation/reuse needs canonical tasks: {task['id']}/{discovery['id']} "
+                    f"target_refs for {discovery['disposition']} require LearningTask; got "
+                    f"{[t['id'] + ':' + t['type'] for t in targets]}. Keep consumer effects in processing/propagation records.")
         if discovery["disposition"] == "PREREQUISITE":
             require(all(any(d["source_ref"] == reference(t) and d["required"] and d["role"] in PROOF_ROLES
                             for d in task["dependency_refs"]) for t in targets), "prerequisite discovery lacks actual required dependency")

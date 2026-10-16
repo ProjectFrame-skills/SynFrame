@@ -12,10 +12,10 @@ from .files import file_sha256
 from .schema import (ACTIONS, MANAGEMENT, CONTRACT_VERSION, SCHEMA_VERSION,
                      FIELDS, META, REVIEW_CHECKS, REFRAME_TRIGGERS, TERMINAL, STORAGE_VERSION, ContractError,
                      require, references, ref, validate, validate_decision,
-                     candidate_patch, validate_result_shape, validate_completion, TRANSITIONS)
+                     candidate_patch, validate_result_shape, validate_completion, validate_discovery_ids, TRANSITIONS)
 from .graph import reference, verified, evaluate, check_io, predicate
 from .deliberation import (validate_alignment, validate_links, question_records,
-                           review_errors, review_inputs, feedback, questions)
+                           review_errors, review_inputs, review_subject_errors, feedback, questions)
 from .learning import (validate_state as validate_learning, dependencies, semantic_content,
                        frontier, learning_gate, important_task, validate_plan, ROLES, PROOF_ROLES)
 from . import tool_obligations, goal_interpretation
@@ -23,6 +23,19 @@ from . import tool_obligations, goal_interpretation
 
 def now():
     return datetime.now(timezone.utc).isoformat()
+
+
+def _validate_evidence_time(doc):
+    # §12.2/13.3: a completed observation cannot follow its new stored record.
+    # Unqualified/unknown times keep their existing representation; this does
+    # not establish the claim's truth or replace the host's time/scope judgment.
+    try:
+        observed = datetime.fromisoformat(doc["observed_at"])
+    except ValueError:
+        return
+    if observed.tzinfo is not None:
+        require(observed <= datetime.fromisoformat(doc["updated_at"]),
+                "observed_at is later than the core-owned record updated_at")
 
 
 def encode(value):
@@ -166,8 +179,16 @@ class Core:
         doc = self.get(run_id, pointer["id"], pointer["revision"])
         current = self.get(run_id, pointer["id"])
         if valid:
-            require(current["revision"] == pointer["revision"] and current["validity_status"] == "VALID", f"stale reference {pointer}")
+            self._require_current_ref(pointer, current)
         return doc
+
+    @staticmethod
+    def _require_current_ref(pointer, current):
+        """Reject a stale binding with observed versions, never refresh it."""
+        if current['revision'] != pointer['revision'] or current['validity_status'] != 'VALID':
+            raise ContractError(f'stale reference {pointer}', details={
+                'requested_ref':dict(pointer), 'current_ref':reference(current),
+                'current_validity_status':current['validity_status']})
 
     @contextmanager
     def _read_view(self, run_id):
@@ -186,7 +207,7 @@ class Core:
                 ref(pointer)
                 document = current.get(pointer['id'])
                 if document is not None and document['revision'] == pointer['revision']:
-                    require(document['validity_status'] == 'VALID', f'stale reference {pointer}')
+                    self._require_current_ref(pointer, document)
                     return document
                 return self.resolve(run_id,pointer)
             yield documents,resolve
@@ -249,6 +270,19 @@ class Core:
         return checksum
 
     def create(self, goal, environment=None, resources=None, parent_run_id=None):
+        guidance = ('HostIO.start(goal, parent_run=None) and solve --input take the raw GoalSpec. '
+                    'For explicit environment/resources, use separate JSON file path options through '
+                    'solve --environment/--resources or the environment/resources options of '
+                    'HostIO.call("solve", payload=goal). '
+                    'See schema --entity GoalSpec; do not move a request envelope into extensions.')
+        if not isinstance(goal, dict):
+            raise ContractError('solve input requires a raw GoalSpec object', details={
+                'path': 'solve.input', 'expected_type': 'GoalSpec object', 'guidance': guidance})
+        envelope_keys = sorted(set(goal) & {'goal', 'environment', 'resources'})
+        if envelope_keys:
+            raise ContractError('solve input requires a raw GoalSpec object; request envelopes are unsupported',
+                details={'path': 'solve.input', 'expected_type': 'GoalSpec object',
+                         'unexpected_keys': envelope_keys, 'guidance': guidance})
         run_id = "run-" + uuid.uuid4().hex
         with self.transaction():
             require(not (set(goal) & (META - {"id", "type", "provenance"})), "initial metadata is core-owned")
@@ -358,6 +392,19 @@ class Core:
                 require({"candidate_ref", "review_ref"} <= set(request["intent"]), "Commit needs candidate/review refs")
                 gate = self.commit_gate(run_id, request["intent"]["candidate_ref"], request["intent"]["review_ref"])
                 require(gate["passed"], "Commit rejected: " + "; ".join(gate["errors"]))
+            if request["action"] == "EXECUTE":
+                # §10.4 executes the adopted solution. Pre-adoption observations
+                # remain work of the selected reasoning action (§9.1).
+                adopted = {key: run["extensions"].get("committed_" + key)
+                           for key in ("candidate_ref", "review_ref")}
+                require(all(adopted.values()),
+                        "EXECUTE needs a current committed candidate and review; "
+                        "use a selected reasoning action for pre-adoption observations")
+                for field, pointer in adopted.items():
+                    require(field not in request["intent"] or request["intent"][field] == pointer,
+                            "EXECUTE " + field + " differs from the committed solution")
+                gate = self.commit_gate(run_id, adopted["candidate_ref"], adopted["review_ref"])
+                require(gate["passed"], "EXECUTE adoption rejected: " + "; ".join(gate["errors"]))
             # Identical failed work cannot be replayed with a fresh key absent evidence.
             work_signature = digest({"action": request["action"], "input_refs": request["input_refs"],
                                      "environment": run["environment"], "intent": {k: v for k, v in request["intent"].items() if k != "retry_evidence_refs"}})
@@ -510,7 +557,7 @@ class Core:
         selected = op["intent"].get("learning_task_refs", [])
         require([r.get("task_ref") for r in result["learning_results"]] == selected,
                 "actual learning output must cover selected task versions")
-        for record in result["learning_results"]:
+        for i, record in enumerate(result["learning_results"]):
             require(set(record) == {"task_ref", "result_ref", "answer_refs", "understanding_change",
                 "discovery_ids", "upward_effects", "observations", "prediction_difference"}, "learning needs four actual result bundles")
             task = lookup(record["result_ref"])
@@ -518,7 +565,7 @@ class Core:
                     and task["revision"] > record["task_ref"]["revision"], "learning output must update actual selected task")
             require(record["observations"] and record["understanding_change"] and record["upward_effects"]
                     and record["prediction_difference"], "learning result cannot substitute fixed empty feedback")
-            require(set(record["discovery_ids"]) == {d["id"] for d in task["expansion"]["discoveries"]}, "result discovery evaluation omitted items")
+            validate_discovery_ids(record, task, f'learning_results[{i}].discovery_ids')
             for pointer in record["answer_refs"]:
                 require(lookup(pointer)["type"] == "EvidenceRecord", "learning answer binding needs observed evidence")
         for path in result["path_assessments"]:
@@ -615,6 +662,8 @@ class Core:
                                             validity=change.get("validity_status", "VALID"))}
                 try:
                     validate(doc)
+                    if doc["type"] == "EvidenceRecord":
+                        _validate_evidence_time(doc)
                 except ContractError as exc:
                     raise ContractError(f"{identity} ({change['type']}): {exc}") from exc
                 if op["action"] == "RECOVERY_INSPECT":
@@ -662,7 +711,7 @@ class Core:
                         goal_interpretation.observation_binding(goal_interpretation.terminal(doc, lookup), current_operations, lookup)
                     if doc['id'] == tool_obligations.identity(current_goal['id'], 'discovery') and doc['disposition'] in {'CLOSED', 'MERGED'}:
                         actual = tool_obligations.terminal(doc, lookup)
-                        require(tool_obligations.observation_binding(actual, current_operations, lookup),
+                        require(tool_obligations.observation_binding(actual, current_operations, lookup, raise_on_missing=True),
                                 'tool discovery has no preserved actual-search observation binding')
                     if doc['id'] == tool_obligations.identity(current_goal['id'], 'composition') and doc['disposition'] in {'CLOSED', 'MERGED'}:
                         require(tool_obligations.composition_binding(tool_obligations.terminal(doc, lookup), current_operations),
@@ -817,9 +866,19 @@ class Core:
         require(candidate['type'] == 'SolutionCandidate', 'review-context needs a solution candidate')
         require(candidate['goal_ref'] == run['goal_ref'], 'candidate uses previous goal')
         goal = resolve(run['goal_ref'])
+        selected_assets = [resolve(pointer) for pointer in candidate['asset_refs']]
+        evidence = {}
+        for document in [candidate, *selected_assets]:
+            for pointer in active_references(document):
+                record = resolve(pointer)
+                if record['type'] == 'EvidenceRecord':
+                    evidence[(record['id'], record['revision'])] = record
         return {'observed_revision': run['revision'], 'candidate_ref': candidate_ref,
                 'goal_ref': run['goal_ref'], 'snapshot': self._snapshot(run_id, candidate_ref,documents,resolve),
-                'structure':self._candidate_structure(candidate, documents,resolve),
+                'structure':self._candidate_structure(goal, candidate, documents,resolve),
+                'selection_context': {'candidate':candidate, 'selected_assets':selected_assets,
+                    'evidence':list(evidence.values()),
+                    'scope':'Declared records only; no necessity, comparison, recommendation or semantic approval generated'},
                 **review_inputs(goal, candidate, documents),
                 'scope': 'Current Review inputs only; host supplies each judgment and evidence scope'}
 
@@ -858,7 +917,7 @@ class Core:
         return sorted(found.values(), key=lambda r: r["id"])
 
     @staticmethod
-    def _candidate_structure(candidate, documents, resolve):
+    def _candidate_structure(goal, candidate, documents, resolve):
         coverage = evaluate(candidate, documents, resolve)
         errors = []
         for field, label in [('missing','missing mandatory capabilities'),
@@ -867,8 +926,9 @@ class Core:
             if coverage[field]:
                 errors.append(label + ': ' + ','.join(coverage[field]))
         io_errors = check_io(candidate, resolve)
-        return {'coverage':coverage,'io_errors':io_errors,'errors':errors + io_errors,
-                'scope':'Declared graph and ports only; not semantic Review approval'}
+        return {'coverage':coverage,'io_errors':io_errors,
+                'errors':errors + io_errors + review_subject_errors(goal, candidate, documents, resolve),
+                'scope':'Declared graph, ports, criterion coverage and contextual assessment presence only; not semantic Review approval'}
 
     def commit_gate(self, run_id, candidate_ref, review_ref):
         with self._read_view(run_id) as (documents,resolve):
@@ -888,13 +948,13 @@ class Core:
             require(candidate["disposition"] == "retain", "candidate is not retained")
             require(candidate.get("extensions", {}).get("selection_validity") == "VALID",
                     "candidate selection/comparison judgment is stale")
-            structure = self._candidate_structure(candidate, documents, resolve)
+            goal = resolve(run["goal_ref"])
+            structure = self._candidate_structure(goal, candidate, documents, resolve)
             coverage = structure['coverage']
             errors += structure['errors']
             errors += learning_gate(candidate, documents, self._obligations(run_id), resolve)
             if review.get("extensions", {}).get("verdict") != "READY":
                 errors.append("Review is not READY")
-            goal = resolve(run["goal_ref"])
             operations = [json.loads(row[0]) for row in self.db.execute(
                 'SELECT data FROM operations WHERE run_id=?', (run_id,))]
             errors += tool_obligations.gate_errors(goal, documents, operations, resolve)
@@ -912,10 +972,6 @@ class Core:
                 check = review["checks"].get(key)
                 if not check or check["status"] != "PASS" or not check["rationale"] or not verified(check["evidence_refs"], resolve):
                     errors.append("missing/failed/ungrounded semantic check: " + key)
-            for pointer in candidate["asset_refs"]:
-                asset = resolve(pointer)
-                if not asset["understanding"]:
-                    errors.append("no contextual understanding assessment: " + asset["id"])
         except (ContractError, KeyError, TypeError, ValueError) as exc:
             errors.append(str(exc))
         return {"passed": not errors, "errors": errors, "coverage": coverage,
@@ -1057,9 +1113,19 @@ class Core:
         state["state_digest"] = digest(state)
         return state
 
-    def work_context(self, run_id, op_id=None):
+    def work_context(self, run_id, op_id=None, *, document_ids=None):
         with self.transaction(rollback=True):
-            return self._work_context(run_id,op_id)
+            context = self._work_context(run_id,op_id)
+            if document_ids is not None:
+                require(type(document_ids) is list and document_ids
+                        and all(type(identity) is str and identity for identity in document_ids)
+                        and len(set(document_ids)) == len(document_ids),
+                        'work-context document IDs must be explicit distinct nonempty strings')
+                documents = {d['id']:d for d in self.documents(run_id)}
+                require(all(identity in documents for identity in document_ids),
+                        'work-context requested document does not exist')
+                context['documents'] = [documents[identity] for identity in document_ids]
+            return context
 
     def _work_context(self, run_id, op_id=None):
         """Project actual work boundaries; never select actions or approve a stop.
@@ -1091,6 +1157,7 @@ class Core:
                 'contract_digest':state['run']['contract_digest'],
                 'implementation_digest':state['run']['extensions'].get('implementation_digest')},
             'revision':state['run']['revision'], 'state_digest':state['state_digest'],
+            'pending_propagation_count':sum(o['status'] == 'PENDING' for o in state['propagation_obligations']),
             'goal':state['goal'],
             'operation':({'operation_ref':reference(operation), 'action':operation['action'],
                 'intent':operation['intent'], 'applied':operation['applied'],

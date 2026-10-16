@@ -17,6 +17,9 @@ preserve_files는 (path, source) 쌍 또는 정확히 path/source 두 키를 가
 
 JSON은 `--input <path>` 또는 `--input -`로 전달한다. 성공은 JSON/코드 0,
 거부나 Gate 실패는 JSON/코드 2다. 상태는 설치 skill 밖의 허용 위치에 둔다.
+HostIO에서는 `call(command, payload, **options)` 또는 `payload=...`로 JSON 값을
+전달한다. `input=`은 CLI JSON 파일 경로이며 사전·목록을 넣지 않는다. 두 경로를
+동시에 지정하면 거부한다. 실제 입력을 교정하며 판단이나 상태를 자동 이전하지 않는다.
 
 - schema: 14개 엔터티 필수 필드, 상태 축, 역할·연산 enum을 조회한다.
 - schema --entity TYPE: 해당 엔터티의 필드·허용값·중첩 형식만 조회한다. 판단 기본값은 없다.
@@ -26,23 +29,49 @@ JSON은 `--input <path>` 또는 `--input -`로 전달한다. 성공은 JSON/코�
   --offset 문자 위치, --limit 1..6000, --expected-sha 현재 hash로 전문을 나누어 읽는다.
   next_offset이 남으면 그 파일의 필수 읽기는 아직 끝나지 않았다. 전송 크기는 추론
   할당량이 아니다. 실제 출력 잘림·문맥 소실·hash 변경을 확인하며 전달을 이해로 보지 않는다.
+- read-contracts: --input 요청 파일 --max-bytes N. 현재 manifest에서 호스트가 명시한
+  ranges(name/sha256/offset/end)를 정확한 본문과 함께 묶어 전달한다. UTF-8 compact JSON의
+  최종 개행까지 N바이트 이내이며, 외부 도구 포장·토큰 예산은 별도로 확보한다. 반환 remaining을
+  다음 ranges로 전달한다. complete는 요청 범위 전달 여부이고 읽기·이해·충분성 승인이 아니다.
+  전송 결과가 상위에서 잘렸으면 손실 구간을 실제로 다시 확보한다. 기존 read-contract도 유지한다.
 - work-context: --run [--operation ID]. 현재 observe의 revision/digest, 원문, 선택 질문,
   선언 소비자의 요청 참조/현재 객체/일치 여부, 기존·신규 자산과 후보, 미완료 학습,
   미반영 관측, 상향 의무와 채택 참조를 조회한다. stale 참조를 고치거나 역할을 추론하지 않는다.
   연산을 생략하면 반환 전 실제 잔여 작업 대조에 쓴다. PARTIAL 상태에서도 미반영을 노출한다.
+  pending_propagation_count는 같은 snapshot의 propagation_obligations에서 PENDING인
+  항목 수다. 원래 목록을 유지하며 의미적 충분성·필수성·종료 판단을 생성하지 않는다.
+  --document-ids ID ...는 호스트가 명시한 전체 현재 문서를 같은 readonly snapshot의 documents에
+  추가한다. 기존 의무·미완료 투영은 유지하며, 없는 ID·중복 ID는 거부한다. 이미 받은 완전한
+  선택 질문/소비자 문서를 즉시 다시 get하지 않는다. 쓰기 뒤에는 이전 snapshot을 최신으로 쓰지 않는다.
 - patch-refs: --run --input 변경 목록. 명시한 객체의 예상 새 버전과 현재 run revision을 조회한다.
   기존 참조를 새 버전으로 바꾸지 않으며, 의미·근거·종료·채택을 승인하지 않는다.
 - review-context: --run --candidate ID@REV. Gate와 같은 현재 원문 facet·기능·질문·
   독립 후속·owner refs·snapshot과 structure의 기능 coverage/I/O 오류를 조회한다.
   structure는 Gate와 같은 검사를 사용하며 PASS나 종료 판단은 생성하지 않는다.
+  selection_context는 같은 readonly snapshot의 후보 전체·선택 자산 전체·그들이 직접
+  참조한 EvidenceRecord를 원문 그대로 반환한다. 비교·필요성·추천 승인이 아니다.
 - preflight: --run --operation --input 결과. 실제 prepare/apply 검사 경로를 실행하고
   트랜잭션을 되돌린다. validated는 구조 검사 결과이며 의미 승인·버전 예약이 아니다.
   prepared_result를 검토하고 명시적으로 apply한다. apply 시 현재 버전을 다시 검사한다.
 - solve: GoalSpec과 선택적 environment/resources, parent-run으로 CREATED 등록.
   모델 실행이 아니다. ACTIVE 전이 후 호스트가 실제 판단·도구를 수행한다.
+  `HostIO.start(goal, parent_run=None)`의 goal과 `solve --input`의 본문은 감싸지 않은
+  GoalSpec 자체다(`schema --entity GoalSpec`). `{goal, environment, resources}` 요청
+  봉투는 지원하지 않으며 이를 extensions로 옮기지 않는다. start의 현행 인자는
+  goal/parent_run뿐이다. 환경·자원을 명시하려면 기존 solve CLI의 `--environment`와
+  `--resources`에 각각 JSON 파일 경로를 전달한다. HostIO.call에서도 `payload=goal`과
+  `environment`/`resources` 파일 경로 options를 분리한다. `--parent-run`은 run ID다.
+  HostIO.call의 solve는 self.run_id를 설정하지 않는다. 후속 호출에는 실제 반환값의
+  `run['id']`로 `HostIO(state, run['id'])`를 명시적으로 생성해 사용한다.
+  봉투를 자동 해체하거나 환경·자원값을 추측하지 않으며 등록은 의미 판단·실행 완료가 아니다.
 - observe/status: --run. 현재 목표·질문·learning_tasks·frontier·propagation_obligations·
   path_assessments·미완료 연산·stale 참조·실제 피드백을 조회한다. observe는 digest를 제공한다.
 - intent/apply/prepare: --run --input; apply/prepare는 --operation도 필요하다.
+  관리 EXECUTE는 합의 §10.4의 채택된 해결책 실행이다. 시작 시 저장된
+  committed_candidate_ref/committed_review_ref와 기존 현재 Commit Gate를 검사한다.
+  채택 전 조사·실험·프로토타입은 §9.1에 따라 선택한 기존 추론 연산의 intent와
+  관측에 연결한다. EXECUTE를 미채택 일반 작업의 운반 명령으로 쓰지 않는다.
+  실행 전 완성 Package는 요구하지 않으며 실제 작업의 의미적 적합성은 호스트 책임이다.
 - finish: --run --operation --input. 기존 prepare→apply를 한 호출로 수행한다.
   새 추론 연산이 아니며 자동 재시도·판단 생성은 없다. 별도 prepare/apply도 유지한다.
 - snapshot/gate: --run --candidate ID@REV; gate에는 --review ID@REV도 필요하다.
@@ -78,11 +107,28 @@ JSON은 `--input <path>` 또는 `--input -`로 전달한다. 성공은 JSON/코�
 (path, source) 목록에서 실제 절대 경로와 파일 hash를 만들어 observe-result에
 전달한다. 반환된 actual_observations의 path 또는 source를 EvidenceRecord.source에
 명시적으로 연결한다. 이것은 내용의 지지 범위·검증 상태·충분성 판단이 아니다.
+원 URL·읽은 위치는 claim.source_locator 또는 명시한 extensions에 별도로 보존한다.
+extensions.observation_file만 추가하는 것은 위 source 바인딩을 대신하지 않는다.
 `preserve_observation`의 입력은 artifact 목록 자체이며 별도 객체로 감싸지 않는다.
+
+`HostIO.write_package(contents, *, path, format, source)`는 호스트가 작성한 열 항목의
+SolutionPackage.contents와 모든 JSON 값을 그대로 html/json 파일로 표시한다. 형식·출력
+위치·출처는 명시하며 기존 파일을 덮어쓰지 않는다. HTML의 키·문자열은 escape한다.
+반환은 실제 path/hash/source 영수증이며 상태 적용·내용 검증·채택·완료를 수행하지 않는다.
+필요한 실제 관측 보존과 Package·Review·Commit·완료 검사는 기존 경로로 수행한다.
 
 `review_context(candidate_ref)`는 Gate와 같은 투영을 사용한다. 미선택 자산을
 제외한 뒤 canonical 질문을 조회하므로 남아 있는 목표/선택 책임을 잃지 않는다.
 각 질문과 독립 후속의 판단은 호스트가 수행하며 조회 결과를 일괄 PASS로 바꾸지 않는다.
+
+`selection_context`는 candidate/selected_assets/evidence/scope를 포함한다. candidate는
+요청한 정확한 현재 SolutionCandidate 전체로 attributes/comparison_rationale/connections를
+유지한다. selected_assets는 asset_refs 순서의 정확한 KnowledgeAsset 전체다. evidence는
+후보와 선택 자산의 직접 활성 참조 중 EvidenceRecord만 중복 제거해 반환하며 원문·
+observation_kind·verification_status·scope를 그대로 보존한다. 후보 밖 대안이나 근거의
+전이적 제공자를 자동 탐색하지 않는다. 추가 자료는 명시적으로 조회한다. 오래된 참조를
+최신으로 고치거나 미확인을 승인/열세로 바꾸지 않으며 조회는 상태를 변경하지 않는다.
+호스트는 §27.15 절차에 따라 기존 후보/학습/Review/패키지를 연결해 판단한다.
 
 `preflight(operation, result)`는 실제 검사에서 실패하면 오류를 반환하고, 통과해도
 객체·이벤트·연산·체크포인트 변경을 모두 rollback한다. 새 의미 판단·외부 도구 실행은
@@ -218,6 +264,75 @@ snapshot/review-context/Gate는 한 readonly SQLite snapshot 안의 문서·정�
 함께 사용한다. 쓰기 트랜잭션 안에서 호출하면 그 현재 snapshot만 사용한다. 호출이 끝나면
 뷰를 폐기하며 다른 호출·revision·쓰기 뒤에 재사용하지 않는다. 패키지 identity·stale·
 역사 참조·호스트 의미 판단·최종 apply 검사는 그대로다. 의미적 PASS·K·종료 캐시는 없다.
+
+### 상위 출력 예산과 정확한 전문 전달 — 2026-10-15 채택 최적화
+
+read-contract의 manifest가 반환한 현재 hash·문자 길이에서 필요한 ranges를 선택한다.
+각 항목은 정확히 name/sha256/offset/end이며 위치 단위는 Unicode 문자다. read-contracts의
+max_bytes는 응답의 실제 직렬화 UTF-8 바이트 한도다. 문자·바이트·토큰은 서로 다르므로,
+여러 하위 결과를 묶을 때 상위 functions.exec/도구 응답 전체의 실제 한도를 함께 고려한다.
+본문 예산에는 JSON escape·메타데이터·최종 개행을 포함한다. 상위 포장과 다른 결과의 여유를
+남기고 실제 출력 토큰·잘림 여부를 확인해 운반 크기를 조정한다. 이 인터페이스가 알 수 없는
+호스트 tokenizer 한도를 자동 보장했다고 주장하지 않는다. 셸 결과 전체를 다시 포장하지 않고
+필요한 계약 응답을 한 번 전달한다. 모든 필수 본문·관계·판단 정책은 그대로 읽는다.
+
+각 반환 ranges에는 실제 전달 text와 chunk_sha256가 있다. remaining은 정확한 후속 범위다.
+파일 변경은 옛 hash의 continuation을 거부한다. 메타데이터와 다음 문자를 담을 수 없는 예산은
+필요한 최소 크기와 함께 거부하며, 진전 없는 반복을 만들지 않는다. 빈 remaining이나 complete를
+실제 읽음으로 대체하지 않는다. 상위 출력이 잘리면 실제 확보한 구간과 미확보 구간을 대조해
+손실 범위를 재요청한다. 로더는 외부에서 잘린 범위를 스스로 관측하거나 승인할 수 없다.
+
+retained는 기존의 명시적인 현재 문맥 보유 선언과 name/sha256/offset/end/chunk_sha256를 쓴다.
+디스크의 과거 영수증이나 ‘전송했음’만으로 선언하지 않는다. 맥락 소실·잘림 후 해당 보유 선언은
+해제하며 필요한 전문을 다시 확보한다. 새 명령은 상태를 생성·변경하지 않는 조회 보조 기능이다.
+
+EvidenceRecord.observation_kind와 LearningTask.answer.claims[].inference는 기존 §6.1·24.2의
+관측과 해석 구분을 따른다. 실제 파일·응답·행동을 관측한 사실과, 그 사실에서 적용·중요성·
+선택·충분성을 도출한 판단을 구분한다. 비교를 수행했다는 기록은 그 발생을 확인하지만 결론의
+진실을 직접 측정한 것은 아니다. source/hash/VERIFIED의 형식 존재도 주장 지지의 의미적 증거를
+대신하지 않는다. 코어와 작성기는 이 구분을 자동 추론하지 않으며 호스트가 범위와 근거를 명시한다.
+
+### 명시적 판단 입력의 재사용 작성기 — 2026-10-15 채택 최적화
+
+`schema --for-command work-context`로 실제 응답 형식을 확인한다. selected_tasks의 항목은
+{requested_ref,current,reference_current}, consumers는 {declared_ref,current,reference_current}다.
+전체 현재 문서는 current에 있으며 null일 수도 있다. assets/candidates는 투영이므로 전체 문서가
+필요하면 명시적 document_ids로 documents를 받는다. 래퍼를 엔터티로 가정하거나 참조를 자동 교체하지 않는다.
+
+`python3 <skill-dir>/scripts/synframe_author.py schema --for-command <command>
+[--entities <EntityType...>]`가 실제 입력 형식과 선택한 전체 schema를 반환한다. 실행은
+`--state <path> --run <id> [--records <path>] [--receipt-only] <command> --input <file|->`다.
+기존 HostIO와 동일한 결정론적 경로를 호출하며 추론 연산·정책·고정 파이프라인을 추가하지 않는다.
+반복 구조를 완전 JSON으로 펼치는 비용이 크면 기존 HostIO의 간결한 호출을 유지한다.
+
+- begin: action/judgment/intent/input_refs/evidence_refs/key 모두 명시한다. judgment의 실제
+  관측 revision/digest를 보존하며 새 관측으로 옛 판단을 덧씌우지 않는다.
+- context: operation_ref(null 또는 정확한 저장 참조)/document_ids(null 또는 명시적 ID 목록).
+  preserve-files: operation_ref/files(path/source). 원본 파일과 실제 영수증을 연결한다.
+- build-result/result: operation_ref/observed_state/changes와 기존 result_ids/preserved_refs/
+  evidence_refs/unresolved_items/observed_effects/next_decision_inputs/outcome/learning_results/
+  propagation_resolutions/path_assessments를 빠짐없이 전달한다. 빈 목록도 호스트의 판단이다.
+  build-result는 직렬화만 한다. result는 명시적으로 완결된 입력에 기존 finish를 호출한다.
+- finish: operation_ref/observed_state와 result 또는 result_file{path,sha256} 중 하나만 쓴다.
+  저장된 canonical 결과를 실제로 읽고 판단한 뒤 정확한 전체 파일 hash로 재전달할 수 있다.
+  새 적용은 현재 관측을 검사한다. 이미 적용한 동일 결과의 재시도는 기존 멱등 검사를 따르며
+  다른 결과는 거부한다. 재시도 때문에 새 판단·버전을 생성하지 않는다.
+- complete: observed_state/package_ref/reason/evidence_refs/verification을 명시한다.
+  observed_state는 정확한 {revision,state_digest}다. 전체 context를 입력에 반복할 필요 없이
+  동일 현재 상태를 검사하고 기존 완료 경로를 호출한다. PASS·미해결 없음은 생성하지 않는다.
+
+changes는 완전한 기존 patch 또는 {base_ref,replacements,removals}다. replacements는
+{path:[사전 키들],value}, removals는 사전 키 경로 목록이다. 현재 base_ref가 일치해야 하며
+중복·중첩 경로, 배열 인덱스, 코어 identity 수정, 암묵적 병합을 거부한다. 목록 전체 교체는
+명시한다. 소비자·근거·K·종료 hash는 자동 갱신하지 않는다. build 후 실제 해석된 기록을 대조해
+필요한 closure 판단을 마치고 finish한다. 읽기와 적용 사이의 실제 상태 변경도 기존 검사가 막는다.
+
+각 호출은 상태 밖 skill 경로에 쓰지 않고 기본 <state>/authoring/<고유 ID>에 원본 input.json과
+invocation.json, 별도 output.json 또는 error.json을 보존한다. result_file 입력은 실제 읽은
+원본도 resolved-result.json으로 보존한다. 실패 기록을 고쳐 덮어쓰지 않는다. --receipt-only는
+출력 위치/hash만 반환하므로 필요한 출력 내용을 실제로 읽어야 한다. 영수증은 이해·승인이 아니다.
+오류 뒤에는 저장된 실제 상태·미완료 연산·외부 효과를 확인하고 원인을 고친 새 입력으로 진행한다.
+이 도구는 의미 판단·충분성·종료·Review·Gate를 대신하거나 자동 재시도하지 않는다.
 
 ## LearningTask
 

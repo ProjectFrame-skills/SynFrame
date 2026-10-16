@@ -134,8 +134,38 @@ class ToolObligationAcceptance(unittest.TestCase):
 
     def test_unrelated_evidence_cannot_use_a_real_receipt(self):
         self.applies()
-        with self.assertRaisesRegex(ContractError,'actual-search observation binding'):
+        with self.assertRaisesRegex(ContractError,'actual-search observation binding') as rejected:
             self.finish_duty('discovery',wrong_source=True)
+        details=rejected.exception.details
+        self.assertEqual(details['task_ref'],r('goal:tool-discovery',2))
+        self.assertEqual(details['ability_id'],'discovery.actual_search')
+        self.assertEqual(details['evidence_sources'],[{'evidence_ref':r('discovery-ev'),'source':'unrelated source'}])
+        self.assertEqual(details['allowed_observations'][0]['source'],'fixture observation discovery')
+        self.assertEqual(details['allowed_observations'][0]['file_status'],'matching')
+        self.assertEqual(self.core.get(self.run_id,'goal:tool-discovery')['disposition'],'OPEN')
+        self.assertFalse(any(d['id']=='discovery-ev' for d in self.core.documents(self.run_id)))
+
+    def test_receipt_path_and_source_bind_but_extension_cannot_replace_canonical_source(self):
+        raw=Path(self.temp.name)/'search-observation.txt';raw.write_text('Actual synthetic search receipt')
+        saved=self.core.get(self.run_id,'goal:tool-scope')
+        saved['understanding']['abilities']=[{'id':'discovery.actual_search','status':'MET','evidence_refs':[r('search-ev')]}]
+        receipt={'path':str(raw),'source':'explicit original source','sha256':hashlib.sha256(raw.read_bytes()).hexdigest()}
+        operation={'id':'search-op','revision':1,'action':'DISCOVER_KNOWLEDGE','applied':True,
+            'result':{'outcome':'SUCCEEDED'},'intent':{'learning_task_refs':[reference(saved)]},
+            'extensions':{'actual_observations':[receipt]}}
+        for source in (receipt['path'],receipt['source']):
+            ev={**evidence('search-ev',source=source),'revision':1}
+            self.assertTrue(duties.observation_binding(saved,[operation],lambda p:ev,raise_on_missing=True))
+        ev={**evidence('search-ev',source='https://example.invalid/original',
+            extensions={'observation_file':str(raw)}),'revision':1}
+        self.assertFalse(duties.observation_binding(saved,[operation],lambda p:ev))
+        with self.assertRaises(ContractError) as rejected:
+            duties.observation_binding(saved,[operation],lambda p:ev,raise_on_missing=True)
+        self.assertEqual(rejected.exception.details['evidence_sources'][0]['source'],ev['source'])
+        raw.write_text('Changed raw source')
+        with self.assertRaises(ContractError) as changed:
+            duties.observation_binding(saved,[operation],lambda p:{**ev,'source':str(raw)},raise_on_missing=True)
+        self.assertEqual(changed.exception.details['allowed_observations'][0]['file_status'],'hash_mismatch')
 
     def test_actual_search_does_not_complete_composition(self):
         self.applies();self.finish_duty('discovery')

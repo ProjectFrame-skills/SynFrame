@@ -271,7 +271,7 @@ class LearningAcceptance(unittest.TestCase):
         import hashlib
         from synframe_core.store import Core
         self.put([evidence(), task()])
-        op = self.core.begin(self.run_id, self.request("EXECUTE", {"task": "Observe external result"}))
+        op = self.core.begin(self.run_id, self.request("DERIVE_CAPABILITY", {"task": "Observe external capability result"}))
         raw = self.path / "raw.txt"; raw.write_text("Actual fixture tool output; not yet assessed")
         artifact = {"path": str(raw), "sha256": hashlib.sha256(raw.read_bytes()).hexdigest(), "source": "Fixture actual output"}
         self.core.record_observation(self.run_id, op["id"], self.revision(), [artifact])
@@ -286,7 +286,7 @@ class LearningAcceptance(unittest.TestCase):
         self.assertEqual(self.core.get(self.run_id, "task")["understanding"]["status"], "UNASSESSED")
         self.core.apply(self.run_id, op["id"], self.core.prepare(self.run_id, op["id"], output(op)))
         self.assertFalse(self.core.status(self.run_id)["pending_operations"])
-        another = self.core.begin(self.run_id, self.request("EXECUTE", {"task": "Other observation"}))
+        another = self.core.begin(self.run_id, self.request("DERIVE_CAPABILITY", {"task": "Other capability observation"}))
         raw.write_text("Changed after hash")
         with self.assertRaisesRegex(ContractError, "artifact changed"):
             self.core.record_observation(self.run_id, another["id"], self.revision(), [artifact])

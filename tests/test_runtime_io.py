@@ -1,5 +1,8 @@
 """Serialization/transaction fixtures, never autonomous reasoning evidence."""
 import copy
+import json
+import subprocess
+import sys
 import unittest
 
 import test_core as fixtures
@@ -20,6 +23,110 @@ class RuntimeIOAcceptance(unittest.TestCase):
 
     def stored(self):
         return list(self.core.db.iterdump())
+
+    def test_startup_envelope_rejection_is_shared_private_and_atomic(self):
+        state = self.path / 'startup-rejection'
+        core = fixtures.Core(state)
+        try:
+            before = list(core.db.iterdump())
+            envelope = {'goal': dict(fixtures.goal(), objective='private-goal-value'),
+                'environment': {'secret': 'private-environment-value'},
+                'resources': {'secret': 'private-resource-value'}}
+            io = HostIO(state)
+            with self.assertRaises(HostError) as caught:
+                io.start(envelope)
+            direct = subprocess.run([sys.executable, str(fixtures.SCRIPTS / 'synframe.py'),
+                '--state', str(state), '--compact', 'solve', '--input', '-'],
+                input=json.dumps(envelope), text=True, capture_output=True)
+            self.assertEqual(caught.exception.returncode, 2)
+            self.assertEqual(direct.returncode, 2)
+            self.assertEqual(caught.exception.detail, json.loads(direct.stderr))
+            detail = caught.exception.detail
+            self.assertEqual(detail['path'], 'solve.input')
+            self.assertEqual(detail['expected_type'], 'GoalSpec object')
+            self.assertEqual(detail['unexpected_keys'], ['environment', 'goal', 'resources'])
+            self.assertIn('JSON file path options', detail['guidance'])
+            self.assertFalse(detail['applied'])
+            self.assertIsNone(io.run_id)
+            for value in ('private-goal-value', 'private-environment-value', 'private-resource-value'):
+                self.assertNotIn(value, caught.exception.stdout + caught.exception.stderr
+                    + direct.stdout + direct.stderr)
+            self.assertEqual(before, list(core.db.iterdump()))
+            for table in ('runs', 'entities', 'operations', 'events', 'checkpoints'):
+                self.assertEqual(core.db.execute('SELECT COUNT(*) FROM ' + table).fetchone()[0], 0)
+            with self.assertRaises(ContractError) as invalid:
+                core.create(['private-nonobject-value'])
+            self.assertEqual(invalid.exception.details['path'], 'solve.input')
+            self.assertNotIn('private-nonobject-value', str(invalid.exception)
+                + json.dumps(invalid.exception.details))
+            self.assertEqual(before, list(core.db.iterdump()))
+        finally:
+            core.close()
+
+    def test_raw_host_start_keeps_goal_and_initial_unassessed_responsibilities(self):
+        io = HostIO(self.path / 'raw-startup')
+        goal = fixtures.goal()
+        original = copy.deepcopy(goal)
+        run = io.start(goal)
+        self.assertEqual(goal, original)
+        self.assertEqual(run['state'], 'CREATED')
+        self.assertEqual(io.run_id, run['id'])
+        saved = io.call('get', id='goal')
+        for field, value in goal.items():
+            self.assertEqual(saved[field], value)
+        self.assertEqual(run['environment'], {})
+        self.assertEqual(run['resource_observations'], {'remaining_tokens': None, 'remaining_cost': None})
+        tasks = {doc['id']: doc for doc in io.call('list') if doc['type'] == 'LearningTask'}
+        self.assertEqual(set(tasks), {'goal:tool-scope', 'goal:goal-interpretation'})
+        for task in tasks.values():
+            self.assertEqual(task['answer']['status'], 'UNANSWERED')
+            self.assertEqual(task['understanding']['status'], 'UNASSESSED')
+            self.assertEqual(task['work_state'], 'READY')
+            self.assertEqual(task['disposition'], 'OPEN')
+        with self.assertRaisesRegex(ValueError, 'already has a run'):
+            io.start(goal)
+
+    def test_raw_solve_cli_preserves_explicit_environment_resource_files(self):
+        state = self.path / 'explicit-startup'
+        goal = fixtures.goal()
+        environment = {'fixture': '명시 < & >', 'enabled': False}
+        resources = {'remaining_tokens': None, 'remaining_cost': None,
+            'explicit_zero': 0, 'explicit_false': False, 'ordered': ['later', 'first']}
+        files = {}
+        for name, value in [('goal', goal), ('environment', environment), ('resources', resources)]:
+            path = self.path / (name + '-startup.json')
+            path.write_text(json.dumps(value, ensure_ascii=False))
+            files[name] = path
+        result = subprocess.run([sys.executable, str(fixtures.SCRIPTS / 'synframe.py'),
+            '--state', str(state), '--compact', 'solve', '--input', str(files['goal']),
+            '--environment', str(files['environment']), '--resources', str(files['resources']),
+            '--parent-run', self.run_id], text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        run = json.loads(result.stdout)
+        self.assertEqual(run['state'], 'CREATED')
+        self.assertEqual(run['environment'], environment)
+        self.assertEqual(run['resource_observations'], resources)
+        self.assertEqual(run['extensions']['parent_run_id'], self.run_id)
+        io = HostIO(state, run['id'])
+        self.assertEqual(io.call('status')['pending_operations'], [])
+        saved = io.call('get', id='goal')
+        for field, value in goal.items():
+            self.assertEqual(saved[field], value)
+
+        sibling_state = self.path / 'explicit-host-call-startup'
+        unbound = HostIO(sibling_state)
+        returned = unbound.call('solve', payload=goal, environment=files['environment'],
+            resources=files['resources'], parent_run=self.run_id)
+        self.assertIsNone(unbound.run_id)
+        self.assertEqual(returned['state'], 'CREATED')
+        self.assertEqual(returned['environment'], environment)
+        self.assertEqual(returned['resource_observations'], resources)
+        self.assertEqual(returned['extensions']['parent_run_id'], self.run_id)
+        bound = HostIO(sibling_state, returned['id'])
+        self.assertEqual(bound.call('status')['run']['id'], returned['id'])
+        saved = bound.call('get', id='goal')
+        for field, value in goal.items():
+            self.assertEqual(saved[field], value)
 
     def test_entity_contract_exposes_actual_enums_and_nested_types(self):
         io = HostIO(self.path, self.run_id)
@@ -95,14 +202,46 @@ class RuntimeIOAcceptance(unittest.TestCase):
 
     def test_preflight_never_refreshes_stale_reference(self):
         self.put([evidence()])
+        prior_ref = r('ev')
+        prior = self.core.get(self.run_id, 'ev')
+        self.put([evidence(claim='Observed replacement for a saved old reference')])
+        before = self.stored()
+        with self.assertRaisesRegex(ContractError, 'stale reference') as direct:
+            self.core.resolve(self.run_id, prior_ref)
+        with self.core._read_view(self.run_id) as (_, resolve):
+            with self.assertRaisesRegex(ContractError, 'stale reference') as snapshot:
+                resolve(prior_ref)
+        expected = {'requested_ref':r('ev'), 'current_ref':r('ev', 2),
+                    'current_validity_status':'VALID'}
+        self.assertEqual(direct.exception.details, expected)
+        self.assertEqual(snapshot.exception.details, expected)
+        self.assertEqual(prior_ref, r('ev'))
+        self.assertEqual(self.core.resolve(self.run_id, prior_ref, valid=False), prior)
+        self.assertEqual(before, self.stored())
+        self.put([evidence('stale-origin'),
+                  evidence('stale-consumer', provenance=[r('stale-origin')])])
+        self.put([evidence('stale-origin', claim='Observed provider change')])
+        invalidated = self.core.get(self.run_id, 'stale-consumer')
+        self.assertEqual(invalidated['validity_status'], 'STALE')
+        current_ref = HostIO.reference(invalidated)
+        before = self.stored()
+        with self.assertRaisesRegex(ContractError, 'stale reference') as direct:
+            self.core.resolve(self.run_id, current_ref)
+        with self.core._read_view(self.run_id) as (_, resolve):
+            with self.assertRaisesRegex(ContractError, 'stale reference') as snapshot:
+                resolve(current_ref)
+        self.assertEqual(direct.exception.details, snapshot.exception.details)
+        self.assertEqual(snapshot.exception.details, {'requested_ref':current_ref,
+            'current_ref':current_ref, 'current_validity_status':'STALE'})
+        self.assertEqual(before, self.stored())
         op = self.core.begin(self.run_id, self.request())
         changed = evidence(claim='Synthetic changed evidence')
-        stale = evidence('consumer', provenance=[r('ev')])
+        stale = evidence('consumer', provenance=[r('ev', 2)])
         raw = output(op, [changed, stale])
         before = self.stored()
         with self.assertRaisesRegex(ContractError, 'wrong new revision'):
             self.core.preflight(self.run_id, op['id'], raw)
-        self.assertEqual(stale['provenance'], [r('ev')])
+        self.assertEqual(stale['provenance'], [r('ev', 2)])
         self.assertEqual(before, self.stored())
         raw['proposed_state_changes'][1]['provenance'] = [
             self.core.patch_refs(self.run_id, [changed])['refs']['ev']]
@@ -138,6 +277,92 @@ class RuntimeIOAcceptance(unittest.TestCase):
         self.assertEqual(context['information_need_refs'], sorted(extensions['information_need_refs'], key=lambda p: p['id']))
         self.assertNotIn('checks', context)
         self.assertEqual(before, self.stored())
+
+    def test_review_context_exposes_existing_gate_subject_defects_before_authorship(self):
+        # Reproduce the observed shape: every derived capability is proved, but
+        # one source criterion has no capability and a selected asset has no
+        # contextual assessment. Neither graph coverage nor I/O catches these.
+        goal = fixtures.goal()
+        goal['success_criteria'].append({'id':'method', 'description':'A grounded method is required'})
+        goal['extensions']['goal_alignment']['facets'][0]['criterion_ids'].append('method')
+        self.run = self.core.create(goal)
+        self.run_id = self.run['id']
+        self.core.transition(self.run_id, 'ACTIVE', 1, 'Begin declared subject-readiness fixture')
+        fixtures.settle_interpretation_fixture(self)
+        self.put(fixtures.declared_scope_fixture(self.core.get(self.run_id, 'goal:tool-scope')))
+        self.put([evidence(), fixtures.capability(), asset(understanding=[]),
+                  fixtures.link(), fixtures.candidate()])
+        before = self.stored()
+        context = self.core.review_context(self.run_id, r('candidate'))
+        self.assertEqual(before, self.stored())
+        self.assertEqual(context['structure']['coverage']['missing'], [])
+        self.assertEqual(context['structure']['io_errors'], [])
+        expected = ['goal success criteria lack capability derivation',
+                    'no contextual understanding assessment: asset']
+        self.assertEqual(context['structure']['errors'], expected)
+        self.assertNotIn('checks', context)
+        self.assertNotIn('passed', context)
+        review_ref = fixtures.CoreAcceptance.review(self)
+        gate = self.core.commit_gate(self.run_id, r('candidate'), review_ref)
+        self.assertFalse(gate['passed'])
+        self.assertEqual(gate['errors'], expected)
+
+    def test_review_selection_context_preserves_declared_values_and_unknown_evidence_readonly(self):
+        self.base()
+        self.put([evidence('indirect'), evidence('unused-evidence'),
+            evidence('unknown', claim='Unconfirmed condition: \"조건\" <量> & next\nline',
+                observation_kind='unknown', verification_status='UNVERIFIED',
+                provenance=[r('indirect')]),
+            {**asset('selected-b', availability='unknown', understanding=[],
+                provenance=[r('unknown')]), 'identity':'도구 B / 条件'},
+            asset('unused', understanding=[], provenance=[r('unused-evidence')]),
+            fixtures.candidate(asset_refs=[r('selected-b'), r('asset')],
+                attributes={'cost':None, 'order':['later', 'first'], 'condition':'미확인 < & >'},
+                comparison_rationale='Declared comparison only.\n추가 부담은 미확인.',
+                provenance=[r('unknown')])])
+        before = self.stored()
+        context = self.core.review_context(self.run_id, r('candidate', 2))
+        selection = context['selection_context']
+        self.assertEqual(selection['candidate'], self.core.get(self.run_id, 'candidate'))
+        self.assertEqual(selection['selected_assets'], [self.core.get(self.run_id, identity)
+            for identity in ('selected-b', 'asset')])
+        records = {record['id']:record for record in selection['evidence']}
+        self.assertEqual(set(records), {'unknown', 'ev'})
+        self.assertEqual(records['unknown'], self.core.get(self.run_id, 'unknown'))
+        self.assertEqual(records['unknown']['verification_status'], 'UNVERIFIED')
+        self.assertEqual(records['unknown']['observation_kind'], 'unknown')
+        self.assertFalse({'checks', 'passed', 'recommendation', 'score'} & set(selection))
+        self.assertEqual(before, self.stored())
+
+    def test_review_selection_context_rejects_old_candidate_without_refresh_or_cache(self):
+        self.base()
+        previous = self.core.review_context(self.run_id, r('candidate'))
+        original = copy.deepcopy(previous)
+        self.put([HostIO.edit(previous['selection_context']['candidate'],
+            comparison_rationale='A newly declared comparison; no automatic approval')])
+        before = self.stored()
+        with self.assertRaisesRegex(ContractError, 'stale reference'):
+            self.core.review_context(self.run_id, r('candidate'))
+        current = self.core.review_context(self.run_id, r('candidate', 2))
+        self.assertEqual(current['selection_context']['candidate'],
+                         self.core.get(self.run_id, 'candidate'))
+        self.assertNotEqual(current['selection_context']['candidate']['comparison_rationale'],
+                            previous['selection_context']['candidate']['comparison_rationale'])
+        self.assertEqual(previous, original)
+        self.assertEqual(before, self.stored())
+
+    def test_empty_subject_errors_do_not_approve_host_review_checks(self):
+        self.base()
+        before = self.stored()
+        context = self.core.review_context(self.run_id, r('candidate'))
+        self.assertEqual(context['structure']['errors'], [])
+        self.assertEqual(before, self.stored())
+        review_ref = fixtures.CoreAcceptance.review(self, changes={'coverage':{
+            'status':'UNKNOWN', 'rationale':'Declared host condition is still unverified',
+            'evidence_refs':[r('ev')]}})
+        gate = self.core.commit_gate(self.run_id, r('candidate'), review_ref)
+        self.assertFalse(gate['passed'])
+        self.assertIn('missing/failed/ungrounded semantic check: coverage', gate['errors'])
 
     def test_host_error_preserves_machine_diagnostics_and_original_output(self):
         io = HostIO(self.path, self.run_id)
