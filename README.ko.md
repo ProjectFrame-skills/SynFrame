@@ -29,6 +29,18 @@ python3 -c "import sqlite3; print(sqlite3.sqlite_version)"
 
 Windows에서 Python 명령이 `python` 또는 `py -3`라면 해당 명령을 사용하세요. `SYNFRAME_PYTHON`은 이미 설치된 Python 실행 파일을 선택하며 Python을 설치해 주지는 않습니다. 다른 AI 호스트는 호환되는 skill 지원과 로컬 실행 기능이 필요합니다. 작업별 추가 도구·서비스 권한은 실제 목표에 따라 달라지며 공통 필수 프로그램은 아닙니다.
 
+### Python 자동 탐색과 설치 오류
+
+npm CLI는 먼저 PATH의 `python3`·`python`을 확인합니다(Windows는 `py -3`도 확인). macOS/Linux에서 Python 3.11 이상을 실행하지 못하면 Homebrew 기본 경로와 `brew --prefix`의 경로, 설치된 `python@…`도 탐색합니다. Homebrew는 선택사항이며 Python을 자동 설치하거나 PATH를 수정하지 않습니다.
+
+`SYNFRAME_PYTHON`으로 실행 파일을 지정하면 해당 파일만 사용합니다. 경로·버전이 잘못돼도 다른 Python으로 조용히 바꾸지 않습니다. 오류는 실행 파일 없음·버전 부족·권한 거부·Python 검사 실패/시간 초과·설치 프로그램 실패를 구분하고, 실패한 검사와 다음 조치를 안내합니다.
+
+필요하면 확인한 Python 경로를 직접 지정할 수 있습니다.
+
+```bash
+SYNFRAME_PYTHON="/absolute/path/to/python3" npx --yes synframe-cli@latest install
+```
+
 ## 🚀 npm으로 바로 설치
 
 ```bash

@@ -1,6 +1,6 @@
 {
   "name": "synframe-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Discover knowledge, compose tools and skills, and explore executable solutions. Install the SynFrame skill for Codex.",
   "type": "module",
   "bin": {
@@ -37,7 +37,7 @@
     "synframe"
   ],
   "scripts": {
-    "test": "node --test tests/npm-cli.test.mjs"
+    "test": "node --test tests/*.test.mjs"
   },
   "publishConfig": {
     "access": "public",

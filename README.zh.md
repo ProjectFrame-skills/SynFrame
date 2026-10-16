@@ -29,6 +29,18 @@ python3 -c "import sqlite3; print(sqlite3.sqlite_version)"
 
 Windows 上如使用 `python` 或 `py -3`，请替换相应命令。`SYNFRAME_PYTHON` 只选择已有的 Python 可执行文件，不负责安装 Python。其他 AI 宿主需要兼容的 skill 支持与本地执行能力。任务所需的额外工具和服务权限取决于具体目标，不属于通用前置条件。
 
+### Python 自动查找与安装错误
+
+npm CLI 先检查 PATH 中的 `python3`/`python`（Windows 还检查 `py -3`）。macOS/Linux 上如无法运行 Python 3.11+，会检查 Homebrew 默认位置、`brew --prefix` 返回的位置及已安装的 `python@…`。Homebrew 不是必需项；CLI 不会安装 Python 或修改 PATH。
+
+`SYNFRAME_PYTHON` 显式指定一个可执行文件。路径或版本不正确时会报错，不会悄悄改用其他 Python。错误区分文件不存在、版本过旧、权限拒绝、Python 检查失败/超时，以及安装程序失败，并提供失败检查与下一步提示。
+
+必要时可指定已确认的 Python 路径：
+
+```bash
+SYNFRAME_PYTHON="/absolute/path/to/python3" npx --yes synframe-cli@latest install
+```
+
 ## 🚀 使用 npm 快速安装
 
 ```bash

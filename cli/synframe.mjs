@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { findPython } from './python.mjs';
 
 const root = new URL('../', import.meta.url);
 const metadata = JSON.parse(readFileSync(new URL('package.json', root), 'utf8'));
@@ -15,6 +16,7 @@ Usage:
 
 Installs the bundled Codex skill. Existing installations are backed up.
 Requires Python 3.11+. Set SYNFRAME_PYTHON to choose an explicit interpreter.
+Automatically checks Homebrew Python locations on macOS/Linux after PATH.
 Default: CODEX_HOME/skills/synframe, or ~/.codex/skills/synframe
 `;
 
@@ -29,20 +31,14 @@ function main() {
       || (args.length === 3 && (args[1] !== '--destination' || !args[2] || args[2].startsWith('-')))) {
     console.error(`Invalid arguments.\n${help}`); return 2;
   }
-  const candidates = process.env.SYNFRAME_PYTHON
-    ? [[process.env.SYNFRAME_PYTHON]]
-    : [['python3'], ['python'], ...(process.platform === 'win32' ? [['py', '-3']] : [])];
-  for (const [command, ...prefix] of candidates) {
-    const probe = spawnSync(command, [...prefix, '-c',
-      'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'], { windowsHide: true, stdio: 'ignore' });
-    if (probe.error || probe.status !== 0) continue;
-    const result = spawnSync(command, [...prefix, fileURLToPath(new URL('tools/install.py', root)),
-      ...args.slice(1)], { windowsHide: true, stdio: 'inherit' });
-    if (result.error) { console.error(result.error.message); return 1; }
-    return result.status ?? 1;
-  }
-  console.error('Python 3.11+ was not found. Install it or set SYNFRAME_PYTHON to its executable path.');
-  return 1;
+  let python;
+  try { python = findPython('SYNFRAME_PYTHON'); }
+  catch (error) { console.error(error.message); return 1; }
+  const result = spawnSync(python.command, [...python.prefix, fileURLToPath(new URL('tools/install.py', root)),
+    ...args.slice(1)], { windowsHide: true, stdio: 'inherit' });
+  if (result.error) { console.error(`Could not start the skill installer: ${result.error.message}`); return 1; }
+  if (result.status !== 0) console.error(`Skill installer failed (${result.signal ? `signal ${result.signal}` : `exit ${result.status}`}). See the installer error above.`);
+  return result.status ?? 1;
 }
 
 process.exitCode = main();

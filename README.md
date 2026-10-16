@@ -29,6 +29,18 @@ python3 -c "import sqlite3; print(sqlite3.sqlite_version)"
 
 On Windows, use `python` or `py -3` if that is your Python command. `SYNFRAME_PYTHON` selects an existing Python executable; it does not install Python. Other AI hosts need compatible skill support and local execution. Additional tools or service access depend on the actual goal and are not universal prerequisites.
 
+### Python discovery and installation errors
+
+The npm CLI first uses `python3`/`python` on PATH (`py -3` on Windows). On macOS/Linux, if those cannot run Python 3.11+, it checks Homebrew's standard prefixes and `brew --prefix`, including installed `python@…` formulae. Homebrew is optional; the CLI does not install Python or edit PATH.
+
+`SYNFRAME_PYTHON` explicitly selects one executable. If set, a bad path or version is reported instead of silently selecting another Python. Errors distinguish a missing executable, an old version, permission denial, a failed/timed-out Python check, and an installer failure. An error lists the failed Python checks and the next step.
+
+If necessary, select a known Python directly:
+
+```bash
+SYNFRAME_PYTHON="/absolute/path/to/python3" npx --yes synframe-cli@latest install
+```
+
 ## 🚀 Install with npm
 
 ```bash
