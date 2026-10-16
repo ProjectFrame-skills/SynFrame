@@ -6,6 +6,29 @@
 ![Python](https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white)
 ![Runtime](https://img.shields.io/badge/runtime-standard%20library%20%2B%20SQLite-16a34a)
 
+## Prerequisites
+
+| Program | When it is required |
+|---|---|
+| Codex app or CLI | The AI host that runs `$synframe`, with skills, local file access, and permission to execute Python. Installing the npm package alone does not provide an AI host. |
+| [Python 3.11+](https://www.python.org/downloads/) | Required for installation and the state/recovery helper. SynFrame also requires Python's [sqlite3](https://docs.python.org/3/library/sqlite3.html) module; it is normally included in Python distributions, so a separate SQLite server or command-line program is unnecessary. |
+| [Node.js 18+](https://nodejs.org/en/download), with npm/npx | Required for the npm/npx installation route and the `synframe` command. Use a currently supported Node.js LTS release. npm/npx are normally included with Node.js. |
+| [Git](https://git-scm.com/downloads/) | Required only for the `git clone` source-install route shown below. |
+
+**npm route:** Codex + Node.js/npm/npx + Python. **Source route:** Codex + Git + Python; SynFrame itself does not require Node.js unless you also use the npm CLI.
+
+Check the npm-route programs before installation:
+
+```bash
+node --version
+npm --version
+npx --version
+python3 --version
+python3 -c "import sqlite3; print(sqlite3.sqlite_version)"
+```
+
+On Windows, use `python` or `py -3` if that is your Python command. `SYNFRAME_PYTHON` selects an existing Python executable; it does not install Python. Other AI hosts need compatible skill support and local execution. Additional tools or service access depend on the actual goal and are not universal prerequisites.
+
 ## 🚀 Install with npm
 
 ```bash

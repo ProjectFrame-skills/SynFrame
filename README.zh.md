@@ -6,6 +6,29 @@
 ![Python](https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white)
 ![Runtime](https://img.shields.io/badge/runtime-standard%20library%20%2B%20SQLite-16a34a)
 
+## 所需软件
+
+| 软件 | 何时需要 |
+|---|---|
+| Codex 应用或 CLI | 运行 `$synframe` 的 AI 宿主，需要支持 skills、本地文件访问和 Python 执行权限。仅安装 npm 包不会提供 AI 宿主。 |
+| [Python 3.11+](https://www.python.org/downloads/) | 安装及状态保存/恢复始终需要。SynFrame 还需要 Python 的 [sqlite3](https://docs.python.org/3/library/sqlite3.html) 模块，通常随 Python 提供，无需单独安装 SQLite 服务器或命令行程序。 |
+| [Node.js 18+](https://nodejs.org/en/download)，含 npm/npx | 使用 npm/npx 安装或 `synframe` 命令时需要。建议选择仍受支持的 Node.js LTS 版本；npm/npx 通常随 Node.js 安装。 |
+| [Git](https://git-scm.com/downloads/) | 仅在使用下方 `git clone` 源码安装方式时需要。 |
+
+**npm 安装：** Codex + Node.js/npm/npx + Python。**源码安装：** Codex + Git + Python；不使用 npm CLI 时，SynFrame 自身无需 Node.js。
+
+安装前可检查 npm 方式需要的软件：
+
+```bash
+node --version
+npm --version
+npx --version
+python3 --version
+python3 -c "import sqlite3; print(sqlite3.sqlite_version)"
+```
+
+Windows 上如使用 `python` 或 `py -3`，请替换相应命令。`SYNFRAME_PYTHON` 只选择已有的 Python 可执行文件，不负责安装 Python。其他 AI 宿主需要兼容的 skill 支持与本地执行能力。任务所需的额外工具和服务权限取决于具体目标，不属于通用前置条件。
+
 ## 🚀 使用 npm 快速安装
 
 ```bash

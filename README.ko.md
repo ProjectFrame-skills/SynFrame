@@ -6,6 +6,29 @@
 ![Python](https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white)
 ![Runtime](https://img.shields.io/badge/runtime-standard%20library%20%2B%20SQLite-16a34a)
 
+## 필수 프로그램
+
+| 프로그램 | 필요한 경우 |
+|---|---|
+| Codex 앱 또는 CLI | `$synframe`을 실행할 AI 호스트입니다. skills·로컬 파일 접근·Python 실행 권한이 필요하며, npm 패키지만 설치한다고 AI 호스트가 제공되는 것은 아닙니다. |
+| [Python 3.11 이상](https://www.python.org/downloads/) | 설치와 상태 저장·복구에 항상 필요합니다. SynFrame은 Python의 [sqlite3](https://docs.python.org/3/library/sqlite3.html) 모듈도 사용합니다. 보통 Python에 포함되어 있으므로 별도 SQLite 서버나 명령행 프로그램을 설치할 필요는 없습니다. |
+| [Node.js 18 이상](https://nodejs.org/en/download) + npm/npx | npm/npx 방식으로 설치하거나 `synframe` 명령을 쓸 때 필요합니다. 현재 지원되는 Node.js LTS 버전을 권장하며, npm/npx는 보통 Node.js와 함께 설치됩니다. |
+| [Git](https://git-scm.com/downloads/) | 아래 `git clone` 소스 설치 방식을 사용할 때만 필요합니다. |
+
+**npm 설치:** Codex + Node.js/npm/npx + Python. **소스 설치:** Codex + Git + Python이며, npm CLI를 쓰지 않으면 SynFrame 자체에는 Node.js가 필요하지 않습니다.
+
+npm 설치 전에 다음 명령으로 확인할 수 있습니다.
+
+```bash
+node --version
+npm --version
+npx --version
+python3 --version
+python3 -c "import sqlite3; print(sqlite3.sqlite_version)"
+```
+
+Windows에서 Python 명령이 `python` 또는 `py -3`라면 해당 명령을 사용하세요. `SYNFRAME_PYTHON`은 이미 설치된 Python 실행 파일을 선택하며 Python을 설치해 주지는 않습니다. 다른 AI 호스트는 호환되는 skill 지원과 로컬 실행 기능이 필요합니다. 작업별 추가 도구·서비스 권한은 실제 목표에 따라 달라지며 공통 필수 프로그램은 아닙니다.
+
 ## 🚀 npm으로 바로 설치
 
 ```bash
