@@ -51,8 +51,8 @@ test('actual update installs the new bundled skill, keeps project state and inst
     writeFileSync(join(candidate,'skills',name,'SKILL.md'),newSkill);
     const npmLog = join(folder, 'npm-calls.jsonl');
     writeFileSync(join(npmBin, 'npm'), `#!${process.execPath}\n`+`
-import { appendFileSync, cpSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+const { appendFileSync, cpSync, mkdirSync } = require('node:fs');
+const { join } = require('node:path');
 const args=process.argv.slice(2);
 appendFileSync(process.env.UPDATE_LOG,JSON.stringify(args)+'\\n');
 if (args.join(' ')==='root --global') console.log(process.env.UPDATE_GLOBAL_ROOT);
