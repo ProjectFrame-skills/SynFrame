@@ -12,17 +12,15 @@
 |---|---|
 | Codex 앱 또는 CLI | `$synframe`을 실행할 AI 호스트입니다. skills·로컬 파일 접근·Python 실행 권한이 필요하며, npm 패키지만 설치한다고 AI 호스트가 제공되는 것은 아닙니다. |
 | [Python 3.11 이상](https://www.python.org/downloads/) | 설치와 상태 저장·복구에 항상 필요합니다. SynFrame은 Python의 [sqlite3](https://docs.python.org/3/library/sqlite3.html) 모듈도 사용합니다. 보통 Python에 포함되어 있으므로 별도 SQLite 서버나 명령행 프로그램을 설치할 필요는 없습니다. |
-| [Node.js 18 이상](https://nodejs.org/en/download) + npm/npx | npm/npx 방식으로 설치하거나 `synframe` 명령을 쓸 때 필요합니다. 현재 지원되는 Node.js LTS 버전을 권장하며, npm/npx는 보통 Node.js와 함께 설치됩니다. |
-| [Git](https://git-scm.com/downloads/) | 아래 `git clone` 소스 설치 방식을 사용할 때만 필요합니다. |
+| [Node.js 18 이상](https://nodejs.org/en/download) + npm | npm 방식으로 전역 설치하거나 `synframe` 명령을 쓸 때 필요합니다. 현재 지원되는 Node.js LTS 버전을 권장하며, npm은 보통 Node.js와 함께 설치됩니다. |
 
-**npm 설치:** Codex + Node.js/npm/npx + Python. **소스 설치:** Codex + Git + Python이며, npm CLI를 쓰지 않으면 SynFrame 자체에는 Node.js가 필요하지 않습니다.
+**필수 프로그램:** Codex + Node.js/npm + Python.
 
 npm 설치 전에 다음 명령으로 확인할 수 있습니다.
 
 ```bash
 node --version
 npm --version
-npx --version
 python3 --version
 python3 -c "import sqlite3; print(sqlite3.sqlite_version)"
 ```
@@ -35,24 +33,20 @@ npm CLI는 먼저 PATH의 `python3`·`python`을 확인합니다(Windows는 `py 
 
 `SYNFRAME_PYTHON`으로 실행 파일을 지정하면 해당 파일만 사용합니다. 경로·버전이 잘못돼도 다른 Python으로 조용히 바꾸지 않습니다. 오류는 실행 파일 없음·버전 부족·권한 거부·Python 검사 실패/시간 초과·설치 프로그램 실패를 구분하고, 실패한 검사와 다음 조치를 안내합니다.
 
-필요하면 확인한 Python 경로를 직접 지정할 수 있습니다.
+전역 CLI 설치 후 필요하면 확인한 Python 경로를 직접 지정할 수 있습니다.
 
 ```bash
-SYNFRAME_PYTHON="/absolute/path/to/python3" npx --yes synframe-cli@latest install
+SYNFRAME_PYTHON="/absolute/path/to/python3" synframe install
 ```
 
-## 🚀 npm으로 바로 설치
+## 🚀 npm으로 전역 설치
 
 ```bash
 npm install -g synframe-cli@latest
 synframe install
 ```
 
-**전역 설치 없이 한 줄로 시작하려면:**
-
-```bash
-npx --yes synframe-cli@latest install
-```
+첫 명령은 전역 CLI를, 두 번째 명령은 실제 skill을 설치합니다. `synframe --version`으로 CLI 설치를 확인할 수 있습니다.
 
 Node.js 18 이상과 Python 3.11 이상이 필요합니다. 설치 후 새 Codex 대화에서 `$synframe`을 호출하세요.
 
@@ -80,17 +74,7 @@ SynFrame은 사용자의 목표를 바탕으로 **어떤 지식이 필요한지,
 
 ### Codex
 
-위 npm 설치가 가장 간단한 방법입니다. CLI는 추가 npm 의존성이 없고, 실행 보조 코드는 Python 표준 라이브러리와 SQLite만 사용합니다.
-
-### 소스에서 설치하기(선택)
-
-Git으로 직접 설치할 수도 있습니다.
-
-```bash
-git clone https://github.com/ProjectFrame-skills/SynFrame.git
-cd SynFrame
-python3 tools/install.py
-```
+위의 npm 전역 설치 명령을 사용하세요. CLI는 추가 npm 의존성이 없고, 실행 보조 코드는 Python 표준 라이브러리와 SQLite만 사용합니다.
 
 기본 설치 위치는 `${CODEX_HOME:-$HOME/.codex}/skills/synframe`입니다. 설치 후 새 Codex 대화에서 skill을 호출하세요. 설치 경로를 직접 지정할 수도 있습니다.
 

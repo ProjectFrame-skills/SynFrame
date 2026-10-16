@@ -12,17 +12,15 @@
 |---|---|
 | Codex app or CLI | The AI host that runs `$synframe`, with skills, local file access, and permission to execute Python. Installing the npm package alone does not provide an AI host. |
 | [Python 3.11+](https://www.python.org/downloads/) | Required for installation and the state/recovery helper. SynFrame also requires Python's [sqlite3](https://docs.python.org/3/library/sqlite3.html) module; it is normally included in Python distributions, so a separate SQLite server or command-line program is unnecessary. |
-| [Node.js 18+](https://nodejs.org/en/download), with npm/npx | Required for the npm/npx installation route and the `synframe` command. Use a currently supported Node.js LTS release. npm/npx are normally included with Node.js. |
-| [Git](https://git-scm.com/downloads/) | Required only for the `git clone` source-install route shown below. |
+| [Node.js 18+](https://nodejs.org/en/download), with npm | Required for the npm installation route and the `synframe` command. Use a currently supported Node.js LTS release. npm is normally included with Node.js. |
 
-**npm route:** Codex + Node.js/npm/npx + Python. **Source route:** Codex + Git + Python; SynFrame itself does not require Node.js unless you also use the npm CLI.
+**Required:** Codex + Node.js/npm + Python.
 
-Check the npm-route programs before installation:
+Check the required programs before installation:
 
 ```bash
 node --version
 npm --version
-npx --version
 python3 --version
 python3 -c "import sqlite3; print(sqlite3.sqlite_version)"
 ```
@@ -35,24 +33,20 @@ The npm CLI first uses `python3`/`python` on PATH (`py -3` on Windows). On macOS
 
 `SYNFRAME_PYTHON` explicitly selects one executable. If set, a bad path or version is reported instead of silently selecting another Python. Errors distinguish a missing executable, an old version, permission denial, a failed/timed-out Python check, and an installer failure. An error lists the failed Python checks and the next step.
 
-If necessary, select a known Python directly:
+After installing the global CLI, select a known Python directly if necessary:
 
 ```bash
-SYNFRAME_PYTHON="/absolute/path/to/python3" npx --yes synframe-cli@latest install
+SYNFRAME_PYTHON="/absolute/path/to/python3" synframe install
 ```
 
-## 🚀 Install with npm
+## 🚀 Global installation with npm
 
 ```bash
 npm install -g synframe-cli@latest
 synframe install
 ```
 
-**Or install the skill in one command, without a global CLI:**
-
-```bash
-npx --yes synframe-cli@latest install
-```
+The first command installs the global CLI; the second installs the actual skill. Check the CLI with `synframe --version`.
 
 Requires Node.js 18+ and Python 3.11+. Invoke `$synframe` in a new Codex conversation after installation.
 
@@ -80,17 +74,7 @@ Recommendations lead with the best-supported combination for the current goal. T
 
 ### Codex
 
-The npm quick start above is the simplest route. The CLI has no npm dependencies; the runtime helper uses only the Python standard library and SQLite.
-
-### Install from source (optional)
-
-You can also install directly with Git.
-
-```bash
-git clone https://github.com/ProjectFrame-skills/SynFrame.git
-cd SynFrame
-python3 tools/install.py
-```
+Use the global npm installation commands above. The CLI has no npm dependencies; the runtime helper uses only the Python standard library and SQLite.
 
 The default destination is `${CODEX_HOME:-$HOME/.codex}/skills/synframe`. Invoke the skill in a new Codex conversation after installation. You can also choose an explicit destination:
 

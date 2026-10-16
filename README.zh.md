@@ -12,17 +12,15 @@
 |---|---|
 | Codex 应用或 CLI | 运行 `$synframe` 的 AI 宿主，需要支持 skills、本地文件访问和 Python 执行权限。仅安装 npm 包不会提供 AI 宿主。 |
 | [Python 3.11+](https://www.python.org/downloads/) | 安装及状态保存/恢复始终需要。SynFrame 还需要 Python 的 [sqlite3](https://docs.python.org/3/library/sqlite3.html) 模块，通常随 Python 提供，无需单独安装 SQLite 服务器或命令行程序。 |
-| [Node.js 18+](https://nodejs.org/en/download)，含 npm/npx | 使用 npm/npx 安装或 `synframe` 命令时需要。建议选择仍受支持的 Node.js LTS 版本；npm/npx 通常随 Node.js 安装。 |
-| [Git](https://git-scm.com/downloads/) | 仅在使用下方 `git clone` 源码安装方式时需要。 |
+| [Node.js 18+](https://nodejs.org/en/download)，含 npm | 使用 npm 安装或 `synframe` 命令时需要。建议选择仍受支持的 Node.js LTS 版本；npm 通常随 Node.js 安装。 |
 
-**npm 安装：** Codex + Node.js/npm/npx + Python。**源码安装：** Codex + Git + Python；不使用 npm CLI 时，SynFrame 自身无需 Node.js。
+**所需软件：** Codex + Node.js/npm + Python。
 
-安装前可检查 npm 方式需要的软件：
+安装前可检查所需软件：
 
 ```bash
 node --version
 npm --version
-npx --version
 python3 --version
 python3 -c "import sqlite3; print(sqlite3.sqlite_version)"
 ```
@@ -35,24 +33,20 @@ npm CLI 先检查 PATH 中的 `python3`/`python`（Windows 还检查 `py -3`）�
 
 `SYNFRAME_PYTHON` 显式指定一个可执行文件。路径或版本不正确时会报错，不会悄悄改用其他 Python。错误区分文件不存在、版本过旧、权限拒绝、Python 检查失败/超时，以及安装程序失败，并提供失败检查与下一步提示。
 
-必要时可指定已确认的 Python 路径：
+全局 CLI 安装后，必要时可指定已确认的 Python 路径：
 
 ```bash
-SYNFRAME_PYTHON="/absolute/path/to/python3" npx --yes synframe-cli@latest install
+SYNFRAME_PYTHON="/absolute/path/to/python3" synframe install
 ```
 
-## 🚀 使用 npm 快速安装
+## 🚀 通过 npm 全局安装
 
 ```bash
 npm install -g synframe-cli@latest
 synframe install
 ```
 
-**也可不安装全局 CLI，直接用一条命令安装 skill：**
-
-```bash
-npx --yes synframe-cli@latest install
-```
+第一条命令安装全局 CLI，第二条命令安装实际 skill。可用 `synframe --version` 检查 CLI。
 
 需要 Node.js 18+ 和 Python 3.11+。安装后在新的 Codex 对话中调用 `$synframe`。
 
@@ -80,17 +74,7 @@ AI 会主动探索并理解必要知识，评估工具与 skill 的组合，将�
 
 ### Codex
 
-上方 npm 快速安装是最简单的方法。CLI 不依赖其他 npm 包；运行辅助代码只使用 Python 标准库和 SQLite。
-
-### 从源码安装（可选）
-
-也可以通过 Git 直接安装。
-
-```bash
-git clone https://github.com/ProjectFrame-skills/SynFrame.git
-cd SynFrame
-python3 tools/install.py
-```
+请使用上方 npm 全局安装命令。CLI 不依赖其他 npm 包；运行辅助代码只使用 Python 标准库和 SQLite。
 
 默认安装位置为 `${CODEX_HOME:-$HOME/.codex}/skills/synframe`。安装后在新的 Codex 对话中调用，也可显式指定路径：
 
