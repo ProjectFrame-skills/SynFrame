@@ -86,6 +86,16 @@ synframe install --destination /absolute/path/to/skills/synframe
 
 SynFrame 전용 모델 API 키나 추론 서버는 필요하지 않습니다. 실제 검색·코딩·외부 도구 사용은 호스트 AI가 자신의 도구와 권한으로 수행합니다. 특정 작업에 필요한 외부 서비스의 접근 권한은 별개입니다.
 
+## 업데이트
+
+```bash
+synframe update
+```
+
+최신 npm 버전으로 전역 CLI를 갱신한 뒤, 새 버전의 설치 도구로 실제 skill도 갱신합니다. 이후 새 Codex 대화에서 사용하세요. 기존과 같은 `CODEX_HOME`을 사용하고, 설치 경로를 직접 지정했다면 `update`에도 같은 `--destination` 옵션을 넘기세요. 사용자 지정 경로를 자동으로 기억하지는 않습니다.
+
+이전 CLI에서 `update`를 인식하지 못하면 위의 전역 설치 명령 두 개를 한 번 실행하세요. npm 갱신 후 skill 설치만 실패했다면 안내된 문제를 해결하고 같은 경로 옵션으로 `synframe install`을 실행하세요.
+
 ## 사용법
 
 ### 실제 대화에서 가져온 사용 예시

@@ -86,6 +86,16 @@ synframe install --destination /absolute/path/to/skills/synframe
 
 SynFrame 不需要专用模型 API key 或推理服务器。研究、编码和外部工具操作由宿主 AI 使用自己的工具及权限完成。具体任务所需外部服务的访问权限另行适用。
 
+## 更新
+
+```bash
+synframe update
+```
+
+先将全局 CLI 更新到 npm 最新发布版本，再使用新版安装工具更新实际 skill。之后请在新的 Codex 对话中使用。保持原有 `CODEX_HOME`；如最初指定了自定义路径，请向 `update` 传入相同的 `--destination` 选项。自定义路径不会被自动记住。
+
+旧版 CLI 如不识别 `update`，请先执行一次上方的两条全局安装命令。如 npm 更新成功但 skill 安装失败，请解决提示的问题，再用相同路径选项运行 `synframe install`。
+
 ## 使用方法
 
 ### 来自真实对话的使用示例
