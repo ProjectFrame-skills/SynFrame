@@ -112,6 +112,26 @@ def dependencies(doc):
         yield dep
 
 
+def consumption_link_errors(plans, documents, label='learning_plan'):
+    """Match declared plan consumers to the edges used by upward propagation.
+
+    Question membership and discovery lineage are not effect/proof edges.
+    The host chooses roles; existing or same-apply edges are both accepted.
+    """
+    edges = {(dep['source_ref']['id'], dep.get('target_ref', reference(doc))['id'])
+        for doc in documents if doc.get('validity_status', 'VALID') == 'VALID'
+        for dep in dependencies(doc) if dep['role'] != 'DISCOVERED_FROM'}
+    errors = []
+    for index, plan in enumerate(plans):
+        source = plan['task_ref']['id']
+        for consumer in plan['judgment_target']['consumer_refs']:
+            if consumer['id'] != source and (source, consumer['id']) not in edges:
+                errors.append(f'{label}[{index}] missing consumption relationship: '
+                    f'{source} -> {consumer["id"]}; declare a role-scoped DependencyLink '
+                    'or consumer judgment_dependencies in this result (not DISCOVERED_FROM)')
+    return errors
+
+
 def validate_shape(task):
     nonempty(task["question"], "learning question")
     subject = task["subject"]

@@ -21,6 +21,11 @@ class WorkLoopIOAcceptance(unittest.TestCase):
     put=fixtures.CoreAcceptance.put
     revision=fixtures.CoreAcceptance.revision
     base=fixtures.CoreAcceptance.base
+    review=fixtures.CoreAcceptance.review
+    review_extensions=fixtures.CoreAcceptance.review_extensions
+    commit=fixtures.CoreAcceptance.commit
+    package=fixtures.CoreAcceptance.package
+    completion=fixtures.CoreAcceptance.completion
 
     def stored(self):return list(self.core.db.iterdump())
     def build(self,io,op,changes,**updates):
@@ -100,6 +105,89 @@ class WorkLoopIOAcceptance(unittest.TestCase):
         self.assertEqual({a['asset_ref']['id'] for a in packet['assets']},{'asset','unused'})
         self.assertEqual(packet['candidates'][0]['asset_refs'],[fixtures.r('asset')])
 
+    def test_requirements_context_exposes_missing_derivation_before_any_candidate(self):
+        before=self.stored();packet=HostIO(self.path,self.run_id).work_context()
+        context=packet['requirements_context']
+        self.assertEqual(context['missing_capability_criterion_ids'],['usable'])
+        self.assertEqual(context['criteria'][0]['source_facets'][0]['source_quote'],'implement through skills')
+        self.assertFalse(context['capabilities'])
+        # The operating/interpretation tasks are visible, but do not fill a
+        # missing domain capability or silently create/answer a new question.
+        self.assertTrue(context['learning_tasks'])
+        self.assertIn('no stored committed candidate/review',packet['return_boundary']['adoption_errors'])
+        self.assertEqual(self.stored(),before)
+
+    def test_requirements_context_keeps_abilities_evidence_consumers_and_unanswered_quality(self):
+        quality=task('quality');tool=task('tool',True)
+        quality['dependency_refs']=[dep('tool')]
+        cap=fixtures.capability();cap['extensions']['questions']=[fixtures.r('quality')]
+        self.put([fixtures.evidence(),tool,quality,cap,
+                  fixtures.link('quality-consumer',[fixtures.r('quality')],'cap','AFFECTS')])
+        before=self.stored();context=self.core.work_context(self.run_id)['requirements_context']
+        actual={d['id']:d for d in context['learning_tasks']}
+        self.assertEqual(actual['quality']['answer_requirements'],quality['answer_requirements'])
+        self.assertEqual(actual['quality']['understanding']['status'],'UNASSESSED')
+        self.assertEqual(actual['tool']['understanding']['status'],'SUFFICIENT')
+        self.assertEqual(context['question_links'][0]['declared_ref'],fixtures.r('quality'))
+        self.assertTrue(context['question_links'][0]['reference_current'])
+        self.assertTrue(any(c['source']['declared_ref']==fixtures.r('quality') and
+                            c['target_ref']==fixtures.r('cap') for c in context['consumers']))
+        self.assertTrue(any(c['source']['declared_ref']==fixtures.r('tool') and
+                            c['target_ref']==fixtures.r('quality') for c in context['consumers']))
+        self.assertEqual(context['evidence'][0]['id'],'ev')
+        self.assertEqual(self.stored(),before)
+        # Declaration coverage is not a semantic assertion that this generic
+        # capability/fixture actually provides the user's intended quality.
+        self.assertEqual(context['missing_capability_criterion_ids'],[])
+        self.assertNotIn('passed',context)
+
+    def test_requirements_projection_never_rebinds_old_question_reference(self):
+        from synframe_core.deliberation import requirements_context
+        self.put([fixtures.evidence(),task('quality')])
+        documents=self.core.documents(self.run_id)
+        cap=fixtures.capability();cap.update(revision=1,validity_status='VALID')
+        cap['extensions']['questions']=[fixtures.r('quality',99)]
+        context=requirements_context(self.core.get(self.run_id,'goal'),[*documents,cap])
+        binding=context['question_links'][0]
+        self.assertEqual(binding['declared_ref'],fixtures.r('quality',99))
+        self.assertEqual(binding['current_ref'],fixtures.r('quality'))
+        self.assertFalse(binding['reference_current'])
+        cap['extensions']['questions']=[fixtures.r('missing')]
+        context=requirements_context(self.core.get(self.run_id,'goal'),[*documents,cap])
+        self.assertIsNone(context['question_links'][0]['current_ref'])
+
+    def test_final_return_rejects_active_without_marking_work_done(self):
+        io=HostIO(self.path,self.run_id);context=io.work_context();before=self.stored()
+        with self.assertRaisesRegex(ValueError,'continue available required work'):
+            io.return_result(context,text='Premature final recommendation')
+        self.assertEqual(self.stored(),before)
+
+    def test_final_return_uses_actual_current_state_not_a_forged_or_stale_context(self):
+        self.put([fixtures.evidence(),task('unfinished')])
+        io=HostIO(self.path,self.run_id);old=io.work_context()
+        self.core.transition(self.run_id,'PARTIAL',self.revision(),'Declared fixture resource interruption')
+        before=self.stored()
+        with self.assertRaisesRegex(ValueError,'exact assessed current'):
+            io.return_result(old,text='Old observed state')
+        current=io.work_context();forged=copy.deepcopy(current);forged['run_ref']['id']='another-run'
+        with self.assertRaisesRegex(ValueError,'exact assessed current'):
+            io.return_result(forged,text='Wrong execution')
+        limited=io.return_result(current,text='Explicit limited result; unanswered work remains.')
+        self.assertEqual(limited['state'],'PARTIAL')
+        self.assertTrue(io.work_context()['unfinished_learning'])
+        self.assertEqual(self.stored(),before)
+
+    def test_final_return_keeps_completed_adoption_gate_and_explicit_text(self):
+        self.base();self.review();self.commit();self.package();self.completion()
+        io=HostIO(self.path,self.run_id);context=io.work_context();before=self.stored()
+        self.assertFalse(context['return_boundary']['adoption_errors'])
+        self.assertEqual(context['requirements_context'],io.review_context(fixtures.r('candidate'))['requirements_context'])
+        text='Exact explicitly authored result\nwith its scope.'
+        result=io.return_result(context,text=text)
+        self.assertEqual(result['text'],text)
+        self.assertEqual(result['result_package_ref'],fixtures.r('package'))
+        self.assertEqual(self.stored(),before)
+
     def test_partial_transition_does_not_hide_unassessed_available_work(self):
         self.put([fixtures.evidence(),task()]);op=self.core.begin(self.run_id,self.request())
         self.core.transition(self.run_id,'PARTIAL',self.revision(),'Declared transport fixture interruption')
@@ -127,7 +215,8 @@ class WorkLoopIOAcceptance(unittest.TestCase):
                     'locator':'fixture receipt','information':'Declared condition','decision_effect':'Required fixture consumer'},
                 'requirement_ids':['ability'],'known_evidence_refs':[fixtures.r('ev')],
                 'judgment_target':{'target_ref':io.reference(old),'item_id':None,'decision':'Declared fixture ability',
-                    'consumer_refs':[fixtures.r('candidate')],'scope':'Synthetic boundary check'},
+                    'consumer_refs':[fixtures.r('parent') if identity=='child' else fixtures.r('candidate')],
+                    'scope':'Synthetic boundary check'},
                 'sufficient_when':'Actual fixture ability and dependency recorded','failure_alternative':'Keep open'}
             op=self.core.begin(self.run_id,self.request('DEEPEN_KNOWLEDGE',{'learning_task_refs':[io.reference(old)],'learning_plan':[plan]}))
             closed=task(identity,True)

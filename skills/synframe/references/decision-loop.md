@@ -25,6 +25,105 @@ resume은 계약·코드·스키마 identity와 체크포인트, LearningTask, f
 재사용하고 원본 실패를 덮어쓰지 않는다. 구버전은 보존 패키지로 복원하거나 명시적
 migrate로 연결한 새 실행에서 재판정한다. 구버전의 답·완료를 새 충분성으로 승격하지 않는다.
 
+## 품질 요구가 필요한 이해와 선택을 제어하게 하기 (§27.16)
+
+목표의 결과·성공 기준을 구체화하거나 중요한 발견·실패·반박·범위 변경을 처리할 때
+work-context.requirements_context를 원문·기존 맥락·실제 사용 조건과 함께 대조한다.
+후보가 없어도 criteria의 원문 facet/기능 도출과 capabilities의 충족 조건·입출력,
+learning_tasks의 요구 능력·답·이해·발견·종료, question_links와 consumers 및 근거를
+조회할 수 있다. current_valid_capability_refs나 missing_capability_criterion_ids는
+선언된 구조의 사실이다. 연결이 있거나 빈 누락 목록이라고 필요한 전문 이해가
+충분한 것은 아니다. 등록된 질문 목록 밖의 중요한 개념 누락은 호스트가 판별한다.
+
+현재 중요한 요구에서 실제로 무엇이 충족된 결과인지, 기능상 성공해도 목적에는
+실패할 조건이 있는지 구별한다. 그 차이를 판단할 개념·원리·전제·경계·실패·검증
+능력을 도출한다. Capability.satisfaction_conditions/criterion_ids에 필요한 결과를
+구체화하고 extensions.questions에는 canonical LearningTask의 정확한 참조를 둔다.
+answer_requirements의 ability/discriminator/sufficient_when/evidence_requirement에는
+현재 판단을 할 수 있는 조건과 근거를 작성한다. 운영 책임의 자동 등록·포괄적
+문구·전체 facet 연결은 이 구체화나 전문적인 이해의 증거가 아니다.
+
+현재 가진 이해로 이미 조건을 구별할 수 있으면 맥락·버전·범위·근거를 대조하여
+재사용한다. 부족하면 원문/부모 판단→부족한 능력→질문→판별 관측→실제 소비자를
+기존 LearningTask·의존·learning_plan에 연결하고 수행한다. requirement_ids는 실제
+부족한 능력이며 judgment_target은 답을 사용할 선택·조건·부모 판단이다. 동일
+작업을 가리킬 수 있어도 '도구 조사'라는 작업 설명으로 판별 대상을 대신하지 않는다.
+모든 기준에 새 질문·같은 외부 검색을 강제하지 않으며 품질 단어의 키워드 규칙이나
+특정 분야의 기대 개념을 만들지 않는다.
+
+도구 관측에서는 제공 기능과 결과 품질을 만드는 책임을 구분한다. 기능이 제공되지
+않는다는 관측이 추천의 타당성을 바꾸면 필요한 개념·방법·기존 자동화 또는 역할
+배분을 학습한다. '나중에 호스트가 한다'는 약속으로 이해 공백을 해소하지 않는다.
+요청하지 않은 실제 제작과, 지금 추천하기 위해 필요한 지식·비교는 구분한다.
+자식의 결과는 부모 능력·조건·현재 후보·작업·검증을 실제 수정하거나 대조 근거로
+유지하며 적용 뒤 새 상태에서 소비와 상향 의무를 확인한다. 후손에서도 같은 규칙이다.
+
+SUFFICIENT 전에 요구 능력별 실제 근거가 무엇을 구별했고 상위 판단에 어떤 결과를
+줬는지 대조한다. 도구 기능의 충분성과 결과를 설계할 충분성, 답 종료와 상향 완료는
+별개다. 부족한 중요한 조건과 가용 관측이 있으면 해당 작업을 선택한다. 능력이
+확보되고 필수 의존·반박·발견이 처리되면 현재 단위는 끝내고 독립 개선은 별도로
+관리한다. K 숫자·깊이·검색 수는 충분성의 근거가 아니다. 유효 지식을 다시 학습하거나
+모든 원리를 조사하지 않는다. 필요한 개념 이름과 조사 깊이를 사용자에게 묻지 않는다.
+
+Review의 기존 coverage/knowledge/evidence/selection/marginal_value와
+capability_conditions/question_assessments에서 원문 품질→능력→근거→선택·작업의
+소비를 대조한다. 구조 조회가 이 의미 판단을 대신하지 않는다. 미해결이면 실제
+후속 질문·관측·수정으로 복귀하며 Review 문구만 바꾸지 않는다.
+
+solve/resume의 최종 추천·결과는 현재 work_context()를 평가하고 실제 완료 또는
+근거 있는 중단 상태를 저장한 뒤 HostIO.return_result(context, text=명시한_최종본문)로
+확인한다. 반환된 text를 그대로 전달한다. 중간 진행 보고와 status/explain 조회는
+이 최종 경로와 구분한다. 함수는 현재 run/revision/digest/identity/state를 재대조하며
+CREATED/ACTIVE나 현재 COMPLETED의 채택 불일치를 거부한다. 거부는 의미적 충분성
+승인이나 외부 중단 사유가 아니다. 가용한 필요한 학습·적용·Review·채택을 수행한다.
+실제 제약·사용자 중단이면 정확한 제한 상태·원인·영향·다음 작업을 보존한다.
+PARTIAL 운반 허용은 그 중단 이유나 본문 주장의 진실을 증명하지 않는다.
+
+## 네 연결부의 실제 작성·적용 절차 (§27.17)
+
+기능 도출 시 원문 결과와 사용 조건에서 성공/목적 실패를 구별할 능력을 도출하여
+Capability.satisfaction_conditions에 구체화한다. 질문이 필요하면 실제
+LearningTask.answer_requirements와 extensions.questions에 연결한다. 유효 이해를
+재사용할 수 있으면 범위와 근거를 대조하고 불필요한 새 질문을 만들지 않는다.
+Review 때 처음 그 판단을 꾸며 넣지 않는다.
+
+기존 capability_conditions의 각 평가에는 understanding_basis를 명시한다.
+항목별 criterion_ids/ability/scope/task_requirements/evidence_refs/consumer_refs/rationale는
+어떤 기준을 판단할 능력인지, 어떤 근거와 조건에서 충분한지, 현재 어떤 소비자에서
+선택·작업·검증에 사용됐는지 연결한다. task_requirements는 정확한 task_ref와
+requirement_ids로 원래 능력을 참조하며 답·K·완료 상태를 복사하지 않는다.
+직접 근거로 재사용 판단이 가능하면 이 목록은 비어 있을 수 있다.
+재사용 질문→소비자도 같은 실제 역할 관계에 연결한다. 새 학습을 예약하지 않았다는
+이유로 관계를 생략하지 않으며, 직접 근거만 쓰는 판단에 새 질문을 강제하지 않는다.
+basis 항목들의 기준 범위는 현재 기능의 criterion_ids를 모두 다루되, 기준마다 새 질문이나 basis
+항목 하나를 강제하지 않는다. 코어의 형식 통과는 의미적 충분성 증명이 아니다.
+
+학습 계획의 consumer_refs를 실제 제공자→소비자 역할 관계와 대조한다.
+외부 소비자는 기존 LearningTask.dependency_refs, 소비자의 judgment_dependencies
+또는 역할 있는 DependencyLink에 연결한다. 관계를 같은 결과에 등록해도 된다.
+소속 질문·원문 facet 공유·DISCOVERED_FROM은 영향 관계가 아니다. 코어는 관계가
+없는 계획의 적용을 거부하며 역할이나 유지 평가를 대신 생성하지 않는다.
+해당 작업의 work-context.operation.consumption_link_errors를 조기에 확인하고,
+관측을 재실행하지 말고 누락한 명시 관계를 보완한다. 적용 뒤 PENDING 의무와 실제
+소비 결과를 다시 대조한다. 자기 질문 내부 능력 갱신을 외부 전파로 만들지 않는다.
+
+requirements_context의 goal_connected_task_refs는 원문 facet의 공유 목록이다.
+capability_question_links·전체 LearningTask·consumers의 실제 관계와 구분한다.
+evidence_bindings의 owner_ref/path/declared_ref/current_ref/reference_current/
+current_validity_status/type_matches와 consumers.target을 대조한다. 새 버전이
+목록에 있다는 이유로 원래 근거를 현재 근거로 바꾸지 않는다. 오래된 인용은 원래
+관측을 보존한 채 실제 재대조·재평가한다.
+
+완료 전이와 return_result는 같은 현재 파일 존재/hash 검사를 사용한다. 반환에서
+변경·삭제·읽기 실패가 발견되면 검증된 결과로 반환하지 않는다. 실제 관측·필요한
+재검증·정확한 제한 결과로 처리하고 이미 종료된 실행은 임의로 다시 열지 않는다.
+필요하면 이전 결과에 연결한 후속 실행을 사용한다. 파일이나 저장 hash를 검사
+통과용으로 자동 수정하지 않는다. 함수 생략을 강제 차단했다거나 부분 결과의
+의미를 자동 승인했다고 보고하지 않는다.
+코어·함수는 직접 작성한 자연어 답변을 가로채지 못하므로 우회 반환을 행동 검증에서
+실패로 구분한다. 종료 hook의 진단이나 비활성 후보를 모델의 계속 수행으로 보고하지
+않으며 실제 신뢰·세션 연결·후속 작업 시험 없이 활성화·해결을 주장하지 않는다.
+
 ## 매 판단: 계속할 의무와 끝낼 의무를 별도로 평가
 
 observe의 run revision/state_digest, goal, information_needs, learning_frontier,

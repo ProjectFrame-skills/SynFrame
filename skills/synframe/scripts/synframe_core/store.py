@@ -8,16 +8,16 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .files import file_sha256
+from .files import file_sha256, validate_artifacts
 from .schema import (ACTIONS, MANAGEMENT, CONTRACT_VERSION, SCHEMA_VERSION,
                      FIELDS, META, REVIEW_CHECKS, REFRAME_TRIGGERS, TERMINAL, STORAGE_VERSION, ContractError,
-                     require, references, ref, validate, validate_decision,
+                     require, references, same_references, ref, validate, validate_decision,
                      candidate_patch, validate_result_shape, validate_completion, validate_discovery_ids, TRANSITIONS)
 from .graph import reference, verified, evaluate, check_io, predicate
 from .deliberation import (validate_alignment, validate_links, question_records,
-                           review_errors, review_inputs, review_subject_errors, feedback, questions)
+                           review_errors, review_inputs, review_subject_errors, requirements_context, feedback, questions)
 from .learning import (validate_state as validate_learning, dependencies, semantic_content,
-                       frontier, learning_gate, important_task, validate_plan, ROLES, PROOF_ROLES)
+                       frontier, learning_gate, important_task, validate_plan, consumption_link_errors, ROLES, PROOF_ROLES)
 from . import tool_obligations, goal_interpretation
 
 
@@ -63,7 +63,7 @@ def important(items):
     return any(not isinstance(item, dict) or item.get("important", True) for item in items)
 
 
-def active_references(doc):
+def active_reference_body(doc):
     # Lineage and discovery catalogs are history, not proof dependencies.
     body = {k: v for k, v in doc.items() if k not in META | {"parent_refs"}}
     if doc["type"] == "LearningTask":
@@ -76,7 +76,11 @@ def active_references(doc):
         body["understanding"] = [{k:v for k,v in u.items() if k != "questions"} for u in doc["understanding"]]
     if "extensions" in body:
         body["extensions"] = {k:v for k,v in body["extensions"].items() if k not in {"questions", "reopen_event", "legacy_origin"}}
-    return references(body | {"provenance": doc["provenance"]})
+    return body | {"provenance": doc["provenance"]}
+
+
+def active_references(doc):
+    return references(active_reference_body(doc))
 
 
 class Core:
@@ -377,7 +381,7 @@ class Core:
                         "learning task is waiting for dependency/upward assessment")
             if request["intent"].get("learning_task_refs"):
                 plans = request["intent"].get("learning_plan", [])
-                require([p.get("task_ref") for p in plans] == request["intent"]["learning_task_refs"],
+                require(same_references([p.get("task_ref") for p in plans], request["intent"]["learning_task_refs"]),
                         "learning plan must cover exact selected task refs")
                 for plan in plans:
                     require(all(type(plan.get(k)) is str and plan[k].strip() for k in
@@ -522,7 +526,14 @@ class Core:
         seen = set()
         for item in resolutions:
             require(type(item) is dict and set(item) == {"id", "assessment", "evidence_refs", "rationale", "result_refs", "remaining_work"}, "invalid propagation assessment")
-            require(item["id"] in pending and item["id"] not in seen and pending[item["id"]]["status"] == "PENDING", "unknown/duplicate/already resolved propagation")
+            obligation = pending.get(item["id"])
+            if obligation is None or item["id"] in seen or obligation["status"] != "PENDING":
+                raise ContractError("unknown/duplicate/already resolved propagation", details={
+                    "id":item["id"], "duplicate":item["id"] in seen,
+                    "status":obligation["status"] if obligation else "UNKNOWN",
+                    "superseded_by":obligation.get("superseded_by") if obligation else None,
+                    "hint":"Inspect patch-refs propagation_obligations for this exact proposed change; "
+                           "assess the actual successor scope explicitly, never copy an old resolution blindly."})
             seen.add(item["id"])
             require(item["assessment"] in {"MAINTAIN", "REVISE", "INVALIDATE", "NEEDS_OBSERVATION"}, "invalid upward effect")
             require(item["rationale"] and verified(item["evidence_refs"], lambda p: self.resolve(run_id, p)), "upward effect needs grounded scope-specific rationale")
@@ -555,7 +566,9 @@ class Core:
         require(type(result["learning_results"]) is list and type(result["path_assessments"]) is list,
                 "learning results/path assessments must be lists")
         selected = op["intent"].get("learning_task_refs", [])
-        require([r.get("task_ref") for r in result["learning_results"]] == selected,
+        actual = [r.get("task_ref") for r in result["learning_results"]]
+        # §21.3: stable identity/version, not presentation order, binds results.
+        require(same_references(actual, selected),
                 "actual learning output must cover selected task versions")
         for i, record in enumerate(result["learning_results"]):
             require(set(record) == {"task_ref", "result_ref", "answer_refs", "understanding_change",
@@ -594,24 +607,23 @@ class Core:
             frontier = following
         return sorted(stale)
 
+    def _invalidated_document(self, run_id, doc, changed, targets):
+        if doc["type"] == "SolutionCandidate":
+            proof_doc = {**doc, "extensions": {k:v for k,v in doc.get("extensions", {}).items()
+                if k != "judgment_dependencies"}}
+            functional = {p["id"] for p in active_references(proof_doc)}
+            if not functional & (set(changed) | set(targets)):
+                return {**doc, **self._meta(run_id, doc['id'], doc['type'], previous=doc,
+                    provenance=doc['provenance']), "extensions": {**doc.get("extensions", {}),
+                        "selection_validity": "STALE"}}
+        return {**doc, **self._meta(run_id, doc['id'], doc['type'], previous=doc,
+            provenance=doc['provenance'], validity='STALE')}
+
     def _invalidate(self, run_id, changed, protected):
         targets = self._invalidation_targets(self.documents(run_id), changed, protected)
         for identity in targets:
             doc = self.get(run_id, identity)
-            if doc["type"] == "SolutionCandidate":
-                proof_doc = {**doc, "extensions": {k:v for k,v in doc.get("extensions", {}).items()
-                    if k != "judgment_dependencies"}}
-                functional = {p["id"] for p in active_references(proof_doc)}
-                if not functional & (set(changed) | set(targets)):
-                    # Comparison failure changes selection validity, not the
-                    # already grounded functional proof. The new revision still
-                    # invalidates old Review/Commit and requires host reassessment.
-                    self._save_entity(run_id, {**doc, **self._meta(run_id, identity, doc["type"], previous=doc,
-                        provenance=doc["provenance"]), "extensions": {**doc.get("extensions", {}),
-                            "selection_validity": "STALE"}})
-                    continue
-            self._save_entity(run_id, {**doc, **self._meta(run_id, identity, doc["type"], previous=doc,
-                provenance=doc["provenance"], validity="STALE")})
+            self._save_entity(run_id, self._invalidated_document(run_id, doc, changed, targets))
         return targets
 
     def apply(self, run_id, op_id, result, *, validate_only=False):
@@ -763,6 +775,8 @@ class Core:
             # Persist the actual functional witness as a core-derived dependency
             # projection. Review separately includes selection/goal learning.
             all_docs = {d["id"]: d for d in self.documents(run_id)} | prepared
+            consumption_errors = consumption_link_errors(op['intent'].get('learning_plan', []), all_docs.values())
+            require(not consumption_errors, '; '.join(consumption_errors))
             for doc in prepared.values():
                 if doc["type"] == "SolutionCandidate" and doc["validity_status"] == "VALID":
                     proof = evaluate(doc, list(all_docs.values()), lookup)
@@ -836,9 +850,13 @@ class Core:
 
     def patch_refs(self, run_id, changes):
         """Predict explicit patch versions; never rewrite existing references."""
+        with self._read_view(run_id) as (documents, _):
+            return self._patch_refs(run_id, changes, documents)
+
+    def _patch_refs(self, run_id, changes, documents):
         run = self._run(run_id)
         require(type(changes) is list, 'patch-refs requires a list of changes')
-        current = {d['id']: d for d in self.documents(run_id)}
+        current = {d['id']: d for d in documents}
         result = {}
         for change in changes:
             require(type(change) is dict and type(change.get('id')) is str and change['id']
@@ -852,8 +870,51 @@ class Core:
             old = current.get(identity)
             require(old is None or old['type'] == change['type'], 'entity type cannot change')
             result[identity] = {'id': identity, 'revision': old['revision'] + 1 if old else 1}
+        def bind(value):
+            if type(value) is dict:
+                if '$patch_ref' in value:
+                    require(set(value) == {'$patch_ref'} and type(value['$patch_ref']) is str
+                        and value['$patch_ref'] in result, 'patch reference must identify an explicit patch record')
+                    return result[value['$patch_ref']]
+                return {k:bind(v) for k,v in value.items()}
+            return [bind(v) for v in value] if type(value) is list else value
+        documents, _, invalidated, additions = self._project_changes(run_id, bind(changes))
         return {'observed_revision': run['revision'], 'refs': result,
-                'scope': 'Proposed versions only; host must explicitly bind and reassess changed consumers'}
+                'invalidated_consumers':[{'previous_ref':reference(current[i]),
+                    'projected_ref':reference(documents[i]),
+                    'projected_validity_status':documents[i]['validity_status'],
+                    'selection_validity':documents[i].get('extensions', {}).get('selection_validity')}
+                    for i in invalidated],
+                'reference_conflicts':self._reference_conflicts(documents.values()),
+                'propagation_obligations':self._obligations(run_id, additions),
+                'scope': 'Read-only proposed versions and declared dependency effects. No validation, '
+                         'semantic approval, automatic rebinding or propagation assessment. Recompute after changing the patch.'}
+
+    @staticmethod
+    def _reference_conflicts(documents):
+        """Locate active mismatches without refreshing refs or judging their meaning."""
+        by_id = {d['id']:d for d in documents}
+        conflicts = []
+        def located(value, path):
+            if type(value) is dict:
+                if set(value) == {'id','revision'}:
+                    yield path, value
+                else:
+                    for key, child in value.items():
+                        yield from located(child, path + [key])
+            elif type(value) is list:
+                for index, child in enumerate(value):
+                    yield from located(child, path + [index])
+        for document in by_id.values():
+            if document['type'] in {'Checkpoint', 'DecisionRecord', 'OperationRecord', 'ReasoningRun'}:
+                continue
+            for path, pointer in located(active_reference_body(document), []):
+                target = by_id.get(pointer['id'])
+                if target is None or pointer != reference(target) or target['validity_status'] != 'VALID':
+                    conflicts.append({'owner_ref':reference(document), 'path':path, 'declared_ref':pointer,
+                        'current_ref':reference(target) if target else None,
+                        'current_validity_status':target['validity_status'] if target else None})
+        return conflicts
 
     def review_context(self, run_id, candidate_ref):
         """Return the gate's exact subjects without generating Review answers."""
@@ -866,19 +927,42 @@ class Core:
         require(candidate['type'] == 'SolutionCandidate', 'review-context needs a solution candidate')
         require(candidate['goal_ref'] == run['goal_ref'], 'candidate uses previous goal')
         goal = resolve(run['goal_ref'])
-        selected_assets = [resolve(pointer) for pointer in candidate['asset_refs']]
+        errors, selected_assets = [], []
+        for pointer in candidate['asset_refs']:
+            try:
+                selected_assets.append(resolve(pointer))
+            except ContractError as exc:
+                errors.append({'stage':'selected_asset', 'message':str(exc), **exc.details})
         evidence = {}
         for document in [candidate, *selected_assets]:
             for pointer in active_references(document):
-                record = resolve(pointer)
+                try:
+                    record = resolve(pointer)
+                except ContractError as exc:
+                    errors.append({'stage':'evidence', 'message':str(exc), **exc.details})
+                    continue
                 if record['type'] == 'EvidenceRecord':
                     evidence[(record['id'], record['revision'])] = record
+        # A broken nested binding must not hide the subjects needed to repair it.
+        # Gate/snapshot themselves remain strict; no Review snapshot is fabricated.
+        try:
+            snapshot = self._snapshot(run_id, candidate_ref, documents, resolve)
+        except ContractError as exc:
+            snapshot = None
+            errors.append({'stage':'snapshot', 'message':str(exc), **exc.details})
+        try:
+            structure = self._candidate_structure(goal, candidate, documents, resolve)
+        except ContractError as exc:
+            structure = {'errors':[str(exc)], 'reference_error':exc.details}
+            errors.append({'stage':'structure', 'message':str(exc), **exc.details})
         return {'observed_revision': run['revision'], 'candidate_ref': candidate_ref,
-                'goal_ref': run['goal_ref'], 'snapshot': self._snapshot(run_id, candidate_ref,documents,resolve),
-                'structure':self._candidate_structure(goal, candidate, documents,resolve),
+                'goal_ref': run['goal_ref'], 'snapshot': snapshot,
+                'reference_errors':errors, 'reference_conflicts':self._reference_conflicts(documents),
+                'structure':structure,
                 'selection_context': {'candidate':candidate, 'selected_assets':selected_assets,
                     'evidence':list(evidence.values()),
                     'scope':'Declared records only; no necessity, comparison, recommendation or semantic approval generated'},
+                'requirements_context': requirements_context(goal, documents),
                 **review_inputs(goal, candidate, documents),
                 'scope': 'Current Review inputs only; host supplies each judgment and evidence scope'}
 
@@ -1018,11 +1102,7 @@ class Core:
                             and type(gap.get("evidence_refs")) is list
                             and verified(gap["evidence_refs"], lambda r: self.resolve(run_id, r)),
                             "minor package uncertainty needs grounded impact/scope rationale")
-                for artifact in package["artifact_refs"]:
-                    require(type(artifact) is dict and set(artifact) == {"path", "sha256", "source"}, "artifact needs path/hash/source")
-                    p = Path(artifact["path"])
-                    require(p.is_absolute() and p.is_file(), "artifact is absent")
-                    require(file_sha256(p) == artifact["sha256"], "artifact changed after validation")
+                validate_artifacts(package["artifact_refs"])
                 require(goal["outcome_type"] == "specification" or package["artifact_refs"], "implementation completion needs actual artifact locations")
                 run["extensions"]["result_package_ref"] = package_ref
             if target in {"PARTIAL", "FAILED", "CANCELLED"} and package_ref:
@@ -1151,6 +1231,29 @@ class Core:
                     'outcome':o['result'].get('outcome'),
                     'expected_apply_revision':o['extensions']['expected_apply_revision']}
                    for o in state['pending_operations']]
+        run = state['run']
+        candidate_ref = run['extensions'].get('committed_candidate_ref')
+        review_ref = run['extensions'].get('committed_review_ref')
+        package_ref = run['extensions'].get('result_package_ref')
+        package = by_id.get(package_ref['id']) if package_ref else None
+        adoption_errors = []
+        if candidate_ref is None or review_ref is None:
+            adoption_errors.append('no stored committed candidate/review')
+        else:
+            adoption_errors += self._commit_gate(run_id, candidate_ref, review_ref,
+                documents, lambda pointer: self.resolve(run_id, pointer))['errors']
+        if not package or package['type'] != 'SolutionPackage':
+            adoption_errors.append('no stored result package')
+        else:
+            if package_ref != reference(package):
+                adoption_errors.append('stored result package reference is stale')
+            if package['candidate_ref'] != candidate_ref or package['review_ref'] != review_ref:
+                adoption_errors.append('result package differs from stored adoption')
+            if run['state'] == 'COMPLETED':
+                try:
+                    validate_artifacts(package['artifact_refs'])
+                except ValueError as exc:
+                    adoption_errors.append(str(exc))
         return {'run_ref':reference(state['run']), 'state':state['run']['state'],
             'compatible':state['compatible'],
             'identity':{'contract_version':state['run']['contract_version'],
@@ -1159,8 +1262,14 @@ class Core:
             'revision':state['run']['revision'], 'state_digest':state['state_digest'],
             'pending_propagation_count':sum(o['status'] == 'PENDING' for o in state['propagation_obligations']),
             'goal':state['goal'],
+            'requirements_context':requirements_context(state['goal'], documents),
+            'return_boundary':{'committed_candidate_ref':candidate_ref, 'committed_review_ref':review_ref,
+                'result_package_ref':package_ref, 'adoption_errors':adoption_errors,
+                'scope':'Current stored adoption structure only. Not semantic approval, '
+                        'permission to stop, or interception of natural-language replies.'},
             'operation':({'operation_ref':reference(operation), 'action':operation['action'],
                 'intent':operation['intent'], 'applied':operation['applied'],
+                'consumption_link_errors': consumption_link_errors(plans, documents),
                 'actual_observations':operation['extensions'].get('actual_observations',[]),
                 'result_refs':operation['result'].get('result_refs',[]),
                 'outcome':operation['result'].get('outcome'),
@@ -1190,6 +1299,28 @@ class Core:
                         'result_package_ref':state['run']['extensions'].get('result_package_ref')},
             'scope':'Observed records only. Host must evaluate knowledge, candidate use, continuation/stop and goal fit. No automatic PASS, relevance or PARTIAL authorization.'}
 
+    def _project_changes(self, run_id, changes):
+        """Shared deterministic prepare projection. No writes, assessment or ref repair."""
+        documents = {d["id"]: d for d in self.documents(run_id)}
+        for change in changes:
+            previous = documents.get(change["id"])
+            documents[change["id"]] = {**change, **self._meta(run_id, change["id"], change["type"],
+                previous=previous, provenance=change.get("provenance", []),
+                validity=change.get("validity_status", "VALID"))}
+        goal = next(d for d in documents.values() if d['type'] == 'GoalSpec' and
+                    d['id'] == self._run(run_id)['goal_ref']['id'])
+        for question in tool_obligations.registration_changes(goal, documents.values(), lambda p: documents[p['id']]):
+            documents[question['id']] = {**question, **self._meta(run_id, question['id'], 'LearningTask')}
+        previous = {d["id"]: self.get(run_id, d["id"]) for d in documents.values()
+                    if any(c["id"] == d["id"] for c in changes)
+                    and self.db.execute("SELECT 1 FROM entities WHERE run_id=? AND id=?", (run_id, d["id"])).fetchone()}
+        invalidated = self._invalidation_targets(list(documents.values()), set(previous),
+            {c["id"] for c in changes})
+        for identity in invalidated:
+            documents[identity] = self._invalidated_document(run_id, documents[identity], set(previous), invalidated)
+        new_obligations = self._derive_obligations(run_id, previous, documents, invalidated)
+        return documents, previous, invalidated, new_obligations
+
     def prepare(self, run_id, op_id, result):
         """Serialize host-authored results and forward questions without resolving them.
 
@@ -1210,26 +1341,8 @@ class Core:
             require(host_content(result) == host_content(operation["result"]),
                     "operation already applied with different host result")
             return operation["result"]
-        documents = {d["id"]: d for d in self.documents(run_id)}
-        for change in result.get("proposed_state_changes", []):
-            previous = documents.get(change["id"])
-            documents[change["id"]] = {**change, **self._meta(run_id, change["id"], change["type"],
-                previous=previous, provenance=change.get("provenance", []),
-                validity=change.get("validity_status", "VALID"))}
-        goal = next(d for d in documents.values() if d['type'] == 'GoalSpec' and
-                    d['id'] == self._run(run_id)['goal_ref']['id'])
-        for question in tool_obligations.registration_changes(goal, documents.values(), lambda p: documents[p['id']]):
-            documents[question['id']] = {**question, **self._meta(run_id, question['id'], 'LearningTask')}
-        previous = {d["id"]: self.get(run_id, d["id"]) for d in documents.values()
-                    if any(c["id"] == d["id"] for c in result.get("proposed_state_changes", []))
-                    and self.db.execute("SELECT 1 FROM entities WHERE run_id=? AND id=?", (run_id, d["id"])).fetchone()}
-        invalidated = self._invalidation_targets(list(documents.values()), set(previous),
-            {c["id"] for c in result.get("proposed_state_changes", [])})
-        for identity in invalidated:
-            old = documents[identity]
-            documents[identity] = {**old, **self._meta(run_id, identity, old["type"], previous=old,
-                provenance=old["provenance"], validity="STALE")}
-        new_obligations = self._derive_obligations(run_id, previous, documents, invalidated)
+        documents, previous, invalidated, new_obligations = self._project_changes(
+            run_id, result.get("proposed_state_changes", []))
         pending = self._obligations(run_id, new_obligations, result.get("propagation_resolutions", []))
         needs = feedback(documents.values()) + self._propagation_feedback(pending)
         result = dict(result)

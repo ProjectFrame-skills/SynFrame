@@ -43,11 +43,15 @@ class ToolObligationAcceptance(unittest.TestCase):
         self.put([evidence('scope-ev'),self.closed(scope,[r('scope-ev')])])
 
     def plan(self, saved):
+        from synframe_core.learning import dependencies
+        consumers=[edge.get('target_ref',reference(doc)) for doc in self.core.documents(self.run_id)
+            for edge in dependencies(doc) if edge['source_ref']['id']==saved['id']
+            and edge['role']!='DISCOVERED_FROM']
         return {'learning_task_refs':[reference(saved)],'learning_plan':[{
             'task_ref':reference(saved),'parent_role':'Contract responsibility in structural fixture',
             'gap':'Declared unfulfilled responsibility','requirement_ids':[n['id'] for n in saved['answer_requirements']],
             'known_evidence_refs':[],'judgment_target':{'target_ref':reference(saved),'item_id':None,
-                'decision':'Assess declared fixture duty','consumer_refs':[r('goal')],'scope':'Fixture only'},
+                'decision':'Assess declared fixture duty','consumer_refs':consumers or [reference(saved)],'scope':'Fixture only'},
             'next_observation':{'target':'Fixture observation','source':'Actual local fixture file',
                 'locator':'fixture raw receipt','information':'Declared observation result','decision_effect':'Duty assessment'},
             'sufficient_when':'Actual fixture bindings present','failure_alternative':'Retain unanswered duty'}]}

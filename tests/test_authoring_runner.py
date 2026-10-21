@@ -255,6 +255,7 @@ class AuthoringRunnerAcceptance(unittest.TestCase):
             'disposition':'EXCLUDE','target_refs':[],'rationale':'Explicit fixture scope exclusion','reopen_condition':'Fixture changes'}]
         self.put([f.evidence(),doc]);saved=self.core.get(self.run_id,doc['id'])
         plan=f.interpretation_plan(saved)
+        plan['learning_plan'][0]['judgment_target']['consumer_refs']=[f.r(saved['id'],saved['revision'])]
         op=self.core.begin(self.run_id,self.request('DEEPEN_KNOWLEDGE',intent=plan))
         changed=HostIO.edit(saved)
         changed['expansion']['scope_rationale']='Earlier branch explicitly reassessed; no new fixture discovery'

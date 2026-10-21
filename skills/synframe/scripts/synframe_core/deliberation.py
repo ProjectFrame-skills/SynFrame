@@ -4,7 +4,7 @@ Agreement §§6–7,9–12,14: expose actual saved questions and feedback to the
 host, and check that adoption accounts for them. No search/K/count policy.
 """
 
-from .schema import require, ref, ACTIONS
+from .schema import require, ref, references, ACTIONS
 from .graph import reference, verified
 
 
@@ -145,12 +145,152 @@ def review_inputs(goal, candidate, documents):
     }
 
 
+def requirements_context(goal, documents):
+    """§27.16: project declared outcome→ability→evidence→consumer links.
+
+    Available before a candidate exists. Missing declared coverage is a
+    structural fact; a populated row never proves adequate understanding.
+    Preserve requested and current references separately, without rebinding.
+    """
+    documents = list(documents)
+    by_id = {d['id']: d for d in documents}
+    goal_ref = reference(goal)
+    facets = goal.get('extensions', {}).get('goal_alignment', {}).get('facets', [])
+    capabilities = [d for d in documents if d['type'] == 'Capability'
+                    and d['goal_ref']['id'] == goal['id']]
+    tasks = [d for d in documents if d['type'] == 'LearningTask'
+             and d['goal_ref']['id'] == goal['id']]
+
+    def binding(pointer, expected_type):
+        current = by_id.get(pointer['id'])
+        return {'declared_ref': pointer,
+            'current_ref': reference(current) if current else None,
+            'reference_current': bool(current and pointer == reference(current)),
+            'current_validity_status': current.get('validity_status') if current else None,
+            'type_matches': bool(current and (expected_type is None or current['type'] == expected_type))}
+
+    links = []
+    for owner in documents:
+        if owner['type'] in {'Frame', 'Capability', 'KnowledgeAsset'}:
+            for context, pointer in questions(owner):
+                if type(pointer) is dict and set(pointer) == {'id', 'revision'}:
+                    links.append({'owner_ref': reference(owner), 'context': context,
+                                  **binding(pointer, 'LearningTask')})
+    consumers = []
+    from .learning import dependencies
+    for consumer in documents:
+        for dependency in dependencies(consumer):
+            source = by_id.get(dependency['source_ref']['id'])
+            if source and source['type'] == 'LearningTask':
+                consumers.append({'relationship_ref': reference(consumer),
+                    'source': binding(dependency['source_ref'], 'LearningTask'),
+                    'target_ref': dependency.get('target_ref', reference(consumer)),
+                    'target': binding(dependency.get('target_ref', reference(consumer)), None),
+                    'role': dependency['role'], 'scope': dependency['scope'],
+                    'required': dependency['required'], 'rationale': dependency['rationale']})
+    rows = []
+    for criterion in goal['success_criteria']:
+        source_facets = [f for f in facets if criterion['id'] in f['criterion_ids']]
+        caps = [c for c in capabilities
+                if criterion['id'] in c.get('extensions', {}).get('criterion_ids', [])]
+        valid = [c for c in caps if c['goal_ref'] == goal_ref and c['validity_status'] == 'VALID']
+        facet_ids = {f['id'] for f in source_facets}
+        rows.append({'criterion': criterion, 'source_facets': source_facets,
+            'capability_refs': [reference(c) for c in caps],
+            'current_valid_capability_refs': [reference(c) for c in valid],
+            'capability_question_links': [link for link in links
+                if link['owner_ref']['id'] in {c['id'] for c in caps}],
+            'goal_connected_task_refs': [reference(t) for t in tasks if any(
+                connection['goal_ref'] == goal_ref and facet_ids.intersection(connection['facet_ids'])
+                for connection in t['goal_connections'])]})
+    evidence_bindings = []
+    def evidence_pointers(value, path=''):
+        if type(value) is dict:
+            if set(value) == {'id', 'revision'}:
+                current = by_id.get(value['id'])
+                if (current and current['type'] == 'EvidenceRecord') or any(
+                        part.endswith('evidence_refs') for part in path.split('.')):
+                    yield path, value
+            else:
+                for key, child in value.items():
+                    yield from evidence_pointers(child, path + '.' + key if path else key)
+        elif type(value) is list:
+            for index, child in enumerate(value):
+                yield from evidence_pointers(child, path + '.' + str(index))
+    for doc in [*capabilities, *tasks]:
+        for path, pointer in evidence_pointers(doc):
+            evidence_bindings.append({'owner_ref': reference(doc), 'path': path,
+                                      **binding(pointer, 'EvidenceRecord')})
+    cited = {entry['declared_ref']['id'] for entry in evidence_bindings}
+    return {'goal_ref': goal_ref, 'criteria': rows, 'capabilities': capabilities,
+        'learning_tasks': tasks, 'question_links': links, 'consumers': consumers,
+        'evidence': [d for d in documents if d['type'] == 'EvidenceRecord' and d['id'] in cited],
+        'evidence_bindings': evidence_bindings,
+        'missing_capability_criterion_ids': [row['criterion']['id'] for row in rows
+                                            if not row['current_valid_capability_refs']],
+        'scope': 'Declared links and full saved abilities/answers only. Goal-connected operating '
+                 'duties do not establish domain understanding. Missing questions and semantic '
+                 'adequacy require host judgment; no relevance, sufficiency, K or stop approval.'}
+
+
+def understanding_basis_errors(capability, assessment, resolve, documents):
+    """§27.17: bind a host's scoped ability judgment, never create its answer."""
+    try:
+        entries = assessment.get('understanding_basis')
+        require(type(entries) is list and entries,
+                'capability_conditions needs understanding_basis: ' + capability['id'])
+        expected = set(capability['extensions']['criterion_ids'])
+        covered = set()
+        for entry in entries:
+            require(type(entry) is dict and set(entry) == {'criterion_ids', 'ability', 'scope',
+                'task_requirements', 'evidence_refs', 'consumer_refs', 'rationale'},
+                'understanding_basis needs criterion_ids/ability/scope/task_requirements/evidence_refs/consumer_refs/rationale')
+            ids = entry['criterion_ids']
+            require(type(ids) is list and ids and all(type(i) is str for i in ids)
+                    and len(set(ids)) == len(ids) and set(ids) <= expected,
+                    'understanding_basis criterion IDs must belong to current capability')
+            covered.update(ids)
+            require(all(type(entry[k]) is str and entry[k].strip() for k in ('ability', 'scope', 'rationale')),
+                    'understanding_basis needs actual ability/scope/consumption rationale')
+            require(type(entry['evidence_refs']) is list and verified(entry['evidence_refs'], resolve),
+                    'understanding_basis needs current scoped evidence')
+            require(type(entry['consumer_refs']) is list and entry['consumer_refs'],
+                    'understanding_basis needs actual consumer refs')
+            for pointer in entry['consumer_refs']:
+                resolve(pointer)
+            require(type(entry['task_requirements']) is list, 'task_requirements must be a list')
+            for item in entry['task_requirements']:
+                require(type(item) is dict and set(item) == {'task_ref', 'requirement_ids'},
+                        'task_requirements needs task_ref/requirement_ids')
+                task = resolve(item['task_ref'])
+                require(task['type'] == 'LearningTask', 'understanding basis requires a canonical LearningTask')
+                selected = item['requirement_ids']
+                require(type(selected) is list and selected and all(type(i) is str for i in selected)
+                        and len(set(selected)) == len(selected)
+                        and set(selected) <= {n['id'] for n in task['answer_requirements']},
+                        'understanding basis uses missing required ability IDs')
+                abilities = {a['id']: a for a in task['understanding']['abilities']}
+                require(all(i in abilities and abilities[i]['status'] == 'MET'
+                        and verified(abilities[i]['evidence_refs'], resolve) for i in selected),
+                        'understanding basis relies on unmet/unverified abilities')
+                from .learning import consumption_link_errors
+                errors = consumption_link_errors([{'task_ref': item['task_ref'],
+                    'judgment_target': {'consumer_refs': entry['consumer_refs']}}],
+                    documents, label='understanding_basis')
+                require(not errors, '; '.join(errors))
+        require(covered == expected, 'understanding_basis omits capability criterion IDs')
+    except (ValueError, KeyError, TypeError) as exc:
+        return [capability['id'] + ': ' + str(exc)]
+    return []
+
+
 def review_errors(goal, candidate, review, documents, resolve):
     """Check explicit per-purpose, per-condition and per-question assessments.
 
     The host must still judge entailment, materiality and sufficiency. These
     bindings prevent a generic PASS and reused evidence list from hiding gaps.
     """
+    documents = list(documents)
     errors = []
     extension = review.get("extensions", {})
     inputs = review_inputs(goal, candidate, documents)
@@ -161,7 +301,9 @@ def review_errors(goal, candidate, review, documents, resolve):
             errors.append("Review needs exact " + name + " assessments")
             return
         for key, value in values.items():
-            if not (type(value) is dict and set(value) == {"status", "rationale", "evidence_refs"}
+            expected = {"status", "rationale", "evidence_refs"} | (
+                {'understanding_basis'} if name == 'capability_conditions' else set())
+            if not (type(value) is dict and set(value) == expected
                     and value["status"] == "PASS" and type(value["rationale"]) is str
                     and value["rationale"].strip() and type(value["evidence_refs"]) is list
                     and verified(value["evidence_refs"], resolve)):
@@ -174,6 +316,11 @@ def review_errors(goal, candidate, review, documents, resolve):
     assessments("goal_alignment", facets)
     caps = inputs['capabilities']
     assessments("capability_conditions", [d["id"] for d in caps])
+    conditions = extension.get('capability_conditions', {})
+    for capability in caps:
+        assessment = conditions.get(capability['id'], {}) if type(conditions) is dict else {}
+        if type(assessment) is dict:
+            errors += understanding_basis_errors(capability, assessment, resolve, documents)
     # §25.3/27.6.10/17: independence does not erase selection impact. Do not
     # require every unused-asset question to close; require a scoped assessment.
     independent = inputs['independent_followups']
@@ -212,11 +359,6 @@ def review_errors(goal, candidate, review, documents, resolve):
             errors.append("question resolution evidence invalid: " + q["key"])
         elif not q["important"] and (not q.get("rationale") or not verified(q.get("evidence_refs", []), resolve)):
             errors.append("non-important uncertainty needs grounded impact assessment: " + q["key"])
-    for pointer in candidate["asset_refs"]:
-        asset = resolve(pointer)
-        for k in asset["understanding"]:
-            if not k["questions"] or not verified(k["evidence_refs"], resolve):
-                errors.append("contextual K lacks decision/application question evidence: " + asset["id"])
     for doc, field in ((candidate, "gaps"), (review, "unresolved_items")):
         for gap in doc[field]:
             if type(gap) is dict and gap.get("important") is False:
@@ -255,6 +397,9 @@ def review_subject_errors(goal, candidate, documents, resolve):
         asset = resolve(pointer)
         if not asset['understanding']:
             errors.append('no contextual understanding assessment: ' + asset['id'])
+        for contextual in asset['understanding']:
+            if not contextual['questions'] or not verified(contextual['evidence_refs'], resolve):
+                errors.append('contextual K lacks decision/application question evidence: ' + asset['id'])
     return errors
 
 

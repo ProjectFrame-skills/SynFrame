@@ -160,10 +160,36 @@ def fixture_tasks(changes, core=None, run_id=None):
 
 
 def output(op, changes=None, outcome="SUCCEEDED", refs=None, core=None):
-    return {"operation_id": op["id"], "result_refs": refs or [], "proposed_state_changes": fixture_tasks(changes, core, op["source_run_id"]),
+    result = {"operation_id": op["id"], "result_refs": refs or [], "proposed_state_changes": fixture_tasks(changes, core, op["source_run_id"]),
             "evidence_refs": [], "unresolved_items": [], "observed_effects": ["Observed result recorded"],
             "next_decision_inputs": ["Reassess critical gaps"], "outcome": outcome,
             "learning_results": [], "propagation_resolutions": [], "path_assessments": []}
+    # Explicit synthetic interpretation effects were already authored below.
+    # Serialize their role edges/MAINTAIN judgments; this is not host behavior.
+    effects = []
+    if core:
+        for doc in list(result['proposed_state_changes']):
+            for index, effect in enumerate(doc.get('extensions', {}).get('interpretation_review', {}).get('effects', [])):
+                if effect['assessment'] != 'MAINTAIN':
+                    continue
+                revision = core.get(op['source_run_id'], doc['id'])['revision'] + 1
+                edge = link('fixture-interpretation-effect-' + str(index),
+                    [r(doc['id'], revision)], effect['target_ref']['id'], 'AFFECTS')
+                edge['target_ref'] = effect['target_ref']
+                edge['evidence_refs'] = effect['evidence_refs']
+                result['proposed_state_changes'].append(edge)
+                effects.append(effect)
+        if effects:
+            projected = core.prepare(op['source_run_id'], op['id'], result)
+            for need in projected['next_decision_inputs']:
+                if type(need) is not dict or not need.get('propagation'):
+                    continue
+                effect = next((e for e in effects if e['target_ref']['id'] == need['owner_ref']['id']), None)
+                if effect:
+                    result['propagation_resolutions'].append({'id': need['key'], 'assessment': 'MAINTAIN',
+                        'evidence_refs': effect['evidence_refs'], 'rationale': effect['rationale'],
+                        'result_refs': [effect['target_ref']], 'remaining_work': []})
+    return result
 
 
 def declared_scope_fixture(scope):
@@ -317,7 +343,14 @@ class CoreAcceptance(unittest.TestCase):
                 and tasks[q['task_ref']['id']]['disposition'] not in {'CLOSED','MERGED'})]
         check = {"status": "PASS", "rationale": "Bounded deterministic fixture observation", "evidence_refs": [r("ev")]}
         return {"verdict": "READY", "goal_alignment": {"source": check},
-            "capability_conditions": {d["id"]: check for d in docs if d["type"] == "Capability" and d["mandatory"]},
+            "capability_conditions": {d["id"]: {**check, 'understanding_basis': [{
+                'criterion_ids': d['extensions']['criterion_ids'],
+                'ability': 'Distinguish the explicitly measured synthetic fixture condition',
+                'scope': 'Declared structural fixture only; no domain understanding claim',
+                'task_requirements': [], 'evidence_refs': [r('ev')],
+                'consumer_refs': [reference(d)],
+                'rationale': 'Declared fixture direct observation used by this capability; not autonomous assessment'}]}
+                for d in docs if d["type"] == "Capability" and d["mandatory"]},
             "question_assessments": {q["key"]: check for q in needs},
             "information_need_refs": list({q["owner_ref"]["id"]: q["owner_ref"] for q in needs}.values()),
             "independent_followups": {d["id"]: {"task_ref": reference(d), "status": "NO_CURRENT_EFFECT",

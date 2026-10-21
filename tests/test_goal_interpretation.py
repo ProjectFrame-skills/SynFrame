@@ -24,14 +24,19 @@ class GoalInterpretationAcceptance(unittest.TestCase):
             [json.loads(row[0]) for row in self.core.db.execute('SELECT data FROM operations WHERE run_id=?',(self.run_id,))],
             lambda p:self.core.resolve(self.run_id,p))
     def finish(self,mutate=None,receipt=True,wrong=False,conditional=False):
-        saved=self.task();op=self.core.begin(self.run_id,self.request('DERIVE_CAPABILITY',interpretation_plan(saved)))
-        raw=Path(self.temp.name)/'two-paths.txt';raw.write_text('Synthetic source support\nSynthetic omission comparison\n')
-        if receipt:self.core.record_observation(self.run_id,op['id'],self.revision(),[{'path':str(raw),
-            'sha256':hashlib.sha256(raw.read_bytes()).hexdigest(),'source':'Synthetic comparison'}])
+        saved=self.task();raw=Path(self.temp.name)/'two-paths.txt'
         changes=declared_interpretation_fixture(saved,'unrelated' if wrong else str(raw),conditional)
         doc=changes[-1]
         if mutate:mutate(doc)
         doc['closure_assessment']['basis']=basis(doc)
+        plan=interpretation_plan(saved)
+        # Declared fixture effects determine its actual consumers before intent.
+        plan['learning_plan'][0]['judgment_target']['consumer_refs']=[
+            e['target_ref'] for e in doc['extensions']['interpretation_review']['effects']]
+        op=self.core.begin(self.run_id,self.request('DERIVE_CAPABILITY',plan))
+        raw.write_text('Synthetic source support\nSynthetic omission comparison\n')
+        if receipt:self.core.record_observation(self.run_id,op['id'],self.revision(),[{'path':str(raw),
+            'sha256':hashlib.sha256(raw.read_bytes()).hexdigest(),'source':'Synthetic comparison'}])
         result=output(op,changes,core=self.core)
         result['learning_results']=[{'task_ref':reference(saved),'result_ref':r(saved['id'],saved['revision']+1),
             'answer_refs':[r('fixture-interpretation-ev')],'understanding_change':'Declared synthetic assessment',

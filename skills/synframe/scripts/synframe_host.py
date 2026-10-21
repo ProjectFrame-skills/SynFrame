@@ -298,6 +298,11 @@ class HostIO:
         return result
 
     def patch_refs(self, changes):
+        """Inspect exact proposed refs, reverse invalidation and successor obligations.
+
+        Recompute after editing changes. This never rebinds literal refs, supplies
+        a resolution, or proves that the proposed consumer comparison occurred.
+        """
         return self.call('patch-refs', changes)
 
     @staticmethod
@@ -336,10 +341,47 @@ class HostIO:
         return self.call('preflight', result, operation=operation['id'])
 
     def work_context(self, operation=None, *, document_ids=None):
-        options = {'operation':operation['id']} if operation else {}
+        """Read stored operation by explicit ID or a returned operation record."""
+        options = {}
+        if operation is not None:
+            identity = operation.get('id') if type(operation) is dict else operation
+            if type(identity) is not str or not identity.strip():
+                raise ValueError('work_context operation needs a nonempty operation ID or record with id')
+            options['operation'] = identity
         if document_ids is not None:
             options['document_ids'] = document_ids
         return self.call('work-context', **options)
+
+    def return_result(self, context, *, text):
+        """Deliver explicit final text only against the assessed current state.
+
+        No transition, semantic judgment or text/claim validation occurs here.
+        Non-completed stopped states preserve truthful limited results; the
+        host must ground their actual cause. Progress/status uses other paths.
+        This helper cannot intercept a model reply that bypasses it.
+        """
+        if type(text) is not str or not text.strip():
+            raise ValueError('return_result needs explicit nonempty final text')
+        if type(context) is not dict or context.get('operation') is not None:
+            raise ValueError('return_result needs an assessed work-context without an operation')
+        current = self.work_context()
+        keys = ('run_ref', 'revision', 'state_digest', 'identity', 'state')
+        if (context.get('run_ref', {}).get('id') != self.run_id
+                or any(context.get(key) != current[key] for key in keys)):
+            raise ValueError('return_result needs the exact assessed current work-context; reassess changed state')
+        if current['state'] in {'CREATED', 'ACTIVE'}:
+            raise ValueError('final result requires actual completion or a grounded stopped state; '
+                             'continue available required work, do not stop for bookkeeping alone')
+        if current['state'] == 'COMPLETED':
+            errors = current['return_boundary']['adoption_errors']
+            if current['pending_operations']:
+                errors = [*errors, 'unapplied operations remain']
+            if errors:
+                raise ValueError('current completion structure is inconsistent: ' + '; '.join(errors))
+        return {'text': text, 'run_ref': current['run_ref'], 'state': current['state'],
+                'state_digest': current['state_digest'],
+                'result_package_ref': current['return_boundary']['result_package_ref'],
+                'scope': 'Explicit host text and checked state boundary; not semantic verification or stop authorization'}
 
     @staticmethod
     def result_ref(applied_result, identity):
@@ -379,6 +421,18 @@ class HostIO:
         unchanged. Inspect resolved content and finalize closure basis afterward.
         This method does not apply anything; call finish then inspect work_context.
         """
+        def check_markers(value):
+            if type(value) is dict:
+                if '$patch_ref' in value:
+                    identity = value['$patch_ref']
+                    if (set(value) != {'$patch_ref'} or type(identity) is not str
+                            or identity not in {c['id'] for c in changes}):
+                        raise ValueError('patch reference must identify exactly one explicit patch record')
+                else:
+                    for child in value.values(): check_markers(child)
+            elif type(value) is list:
+                for child in value: check_markers(child)
+        check_markers(changes)
         projection = self.patch_refs(changes)
         if expected_revision is not None and projection['observed_revision'] != expected_revision:
             raise ValueError('result projection changed after the host observation; reassess without automatic rebasing')

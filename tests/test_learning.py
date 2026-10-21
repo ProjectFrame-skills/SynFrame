@@ -41,13 +41,17 @@ class LearningAcceptance(unittest.TestCase):
 
     def learn(self, identity, changed, resolutions=None):
         saved = self.core.get(self.run_id, identity)
+        from synframe_core.learning import dependencies
+        consumers = [edge.get('target_ref', reference(doc)) for doc in self.core.documents(self.run_id)
+                     for edge in dependencies(doc) if edge['source_ref']['id'] == identity
+                     and edge['role'] != 'DISCOVERED_FROM']
         req = self.request("DEEPEN_KNOWLEDGE", {"learning_task_refs": [reference(saved)],
             "learning_plan": [{"task_ref": reference(saved), "parent_role": "Fixture dependency",
                 "gap": "Declared unresolved ability", "next_observation": {"target":"Fixture required condition", "source":"Declared fixture evidence",
                     "locator":"fixture:ev", "information":"Condition present or absent", "decision_effect":"Fixture ability assessment"},
                 "requirement_ids":[n["id"] for n in saved["answer_requirements"]], "known_evidence_refs":[r("ev")],
                 "judgment_target":{"target_ref":reference(saved), "item_id":None, "decision":"Evaluate fixture ability",
-                    "consumer_refs":[r("goal")], "scope":"Bounded fixture"},
+                    "consumer_refs": consumers or [reference(saved)], "scope":"Bounded fixture"},
                 "sufficient_when": "Required fixture ability is supported", "failure_alternative": "Different fixture path"}]})
         op = self.core.begin(self.run_id, req)
         result = output(op, changed, core=self.core)

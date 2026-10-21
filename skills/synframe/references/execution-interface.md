@@ -5,6 +5,65 @@
 
 ## 호출과 버전
 
+§27.17에서 기존 ReviewRecord.extensions.capability_conditions[capability_id]는
+status/rationale/evidence_refs와 understanding_basis를 갖는다. understanding_basis는
+비어 있지 않은 목록이며 각 항목은 다음 정확한 키를 사용한다.
+
+```text
+criterion_ids: 현재 Capability.extensions.criterion_ids의 비어 있지 않은 일부
+ability: 현재 결과를 판별할 실제 능력 설명
+scope: 능력을 사용할 목적·환경·조건
+task_requirements: [{task_ref: 정확한 LearningTask 참조, requirement_ids: 필요한 능력 ID 목록}]
+evidence_refs: 실제 현재 VERIFIED EvidenceRecord 참조 목록
+consumer_refs: 실제 현재 소비자 참조 목록
+rationale: 현재 근거로 충분/부족한 이유와 실제 소비 효과
+```
+
+기준 ID의 합집합은 해당 기능의 기준 범위를 다룬다. task_requirements는 직접적인
+유효 이해 재사용이면 []일 수 있다. 사용한 질문 능력은 실제 MET와 유효 근거에
+연결하며, 다른 능력까지 충분하다고 확대하지 않는다. 새 검사 키나 별도 품질 답·K·
+완료 상태를 생성하지 않는다. 의미 판단은 호스트가 작성한다.
+재사용 질문 능력의 consumer_refs도 아래와 같은 실제 역할 관계로 대조한다.
+
+학습 적용은 learning_plan.judgment_target.consumer_refs와 propagation에 쓰는
+실제 역할 관계를 대조한다. 기존 관계나 같은 결과의 DependencyLink 또는 소비자
+extensions.judgment_dependencies로 연결한다. 자기 질문 내부 갱신은 결과 task
+버전으로 처리하며 별도 자기 전파 의무를 만들지 않는다. 소속 질문 링크와
+DISCOVERED_FROM만으로는 외부 소비 관계를 충족하지 않는다. 누락하면 적용을
+원자 거부한다. work-context의 해당 operation.consumption_link_errors로 같은
+연결 진단을 조회한다. 조회 때 아직 같은 결과를 제출하지 않았다면 그 결과에
+추가할 관계는 진단에 반영되지 않는다. preflight는 제안 변경까지 실제 검사한다.
+
+requirements_context.evidence_bindings는 owner_ref/path 및 선언·현재 버전·일치·
+현재 유효성·타입을 함께 제공한다. consumers.target도 같은 바인딩이다. 기존 evidence
+목록은 현재 문서의 catalog이며 원래 인용 버전의 자동 대체가 아니다.
+consumers.relationship_ref와 rationale는 실제 역할 관계의 소유 객체와 선언 이유를
+제공한다. 역할·범위가 현재 판단에 맞는지는 호스트가 그 관계와 계획을 대조한다.
+완료 전이 및 반환 시점에는 같은 validate_artifacts 경로로 현재 파일을 검사한다.
+반환 오류가 과거 완료 기록을 변경하거나 후속 실행의 완료를 승인하지 않는다.
+
+§27.16의 읽기 전용 `requirements_context`는 work-context와 review-context에서 같은
+함수를 사용한다. 후보 없이도 criteria(원문 facet/선언 기능/유효 현재 기능/목표 연결
+질문), capabilities 전체, learning_tasks 전체, question_links(선언/현재 참조와 일치),
+consumers(선언된 source/target/role/scope/required), 직접 참조한 evidence를 조회한다.
+missing_capability_criterion_ids는 유효한 현재 기능 도출이 없는 기준 ID다. 자동 등록한
+운영 질문의 goal 연결을 전문 이해로 승격하지 않는다. 해당 필드는 snapshot의 투영이며
+새 필수 저장 필드·상태 축·질문 생성·의미 승인·K·종료 판단이 아니다. 선언 참조를
+current_ref로 자동 교체하지 않는다. 실제 누락한 전문 개념은 호스트가 원문에서 판단한다.
+
+work-context.return_boundary는 현재 committed_candidate_ref/committed_review_ref/
+result_package_ref와 기존 Gate를 재사용한 adoption_errors를 제공한다. 패키지나 채택이
+없어도 현재 사실을 반환하며, 조회 성공을 완료 자격으로 해석하지 않는다.
+`HostIO.return_result(context, text=...)`는 호스트가 평가한 연산 없는 work_context와
+명시한 최종 본문을 받는다. 같은 run/revision/digest/identity/state인지 재조회해 확인하고
+CREATED/ACTIVE 결과 반환을 거부한다. COMPLETED에는 현재 저장 채택·패키지·Gate의
+일치를 요구한다. 실제 PARTIAL/BLOCKED/SUSPENDED/FAILED/CANCELLED의 제한 결과는
+미완료를 유지한 채 운반한다. 반환은 text/run_ref/state/state_digest/result_package_ref와
+검증 범위이며 상태를 바꾸거나 본문·중단 사유의 의미를 검증하지 않는다. 반환 text를
+그대로 전달하고, 거부되면 현재 필요한 작업 또는 실제 제약을 처리한 뒤 재평가한다.
+중간 보고·status/explain 조회와 구분한다. 보조 함수를 생략하는 직접 자연어 반환까지
+차단하는 API는 아니다. 종료 hook 통합은 실제 지원·신뢰·연결·행동 검증을 따로 요구한다.
+
 HostIO.build_result는 새 변경 중 호스트가 명시한 result_ids의 예상 참조와
 명시적인 preserved_refs를 result_refs로 만든다. 나머지 의미적 결과 묶음은 모두
 호스트가 전달한다. 결과 객체를 반환하며 적용하지 않는다. finish(operation, result)는
@@ -43,11 +102,23 @@ HostIO에서는 `call(command, payload, **options)` 또는 `payload=...`로 JSON
   --document-ids ID ...는 호스트가 명시한 전체 현재 문서를 같은 readonly snapshot의 documents에
   추가한다. 기존 의무·미완료 투영은 유지하며, 없는 ID·중복 ID는 거부한다. 이미 받은 완전한
   선택 질문/소비자 문서를 즉시 다시 get하지 않는다. 쓰기 뒤에는 이전 snapshot을 최신으로 쓰지 않는다.
-- patch-refs: --run --input 변경 목록. 명시한 객체의 예상 새 버전과 현재 run revision을 조회한다.
-  기존 참조를 새 버전으로 바꾸지 않으며, 의미·근거·종료·채택을 승인하지 않는다.
+  HostIO.work_context(operation)는 반환된 연산 객체 또는 명시한 nonempty 연산 ID 문자열을
+  받는다. CLI --operation 역시 ID다. 실제 저장 연산을 조회하며 새 판단·revision을 생성하지 않는다.
+- patch-refs: --run --input 변경 목록. 명시한 객체의 예상 새 버전과 현재 run revision,
+  invalidated_consumers(전이 영향의 이전/예정 참조·유효성), reference_conflicts(소유자·정확한
+  필드 경로·선언 참조·예정 현재 참조), propagation_obligations(대체·후속 의무 포함)를 조회한다.
+  명시한 같은 patch의 $patch_ref는 투영 안에서만 해석하며 입력을 바꾸지 않는다.
+  prepare와 같은 결정론적 변경 투영을 사용한다. 실제 apply 검사·의미 승인·참조 교정은 아니다.
+  변경 목록을 수정하면 다시 투영하고, 예정 의무의 source/scope/대상·실제 결과를 호스트가
+  대조하여 해결 판단을 작성한다. SUPERSEDED 의무의 ID만 후속 ID로 치환해 판단을 복사하지 않는다.
 - review-context: --run --candidate ID@REV. Gate와 같은 현재 원문 facet·기능·질문·
   독립 후속·owner refs·snapshot과 structure의 기능 coverage/I/O 오류를 조회한다.
   structure는 Gate와 같은 검사를 사용하며 PASS나 종료 판단은 생성하지 않는다.
+  선택 자산의 기존 contextual K 질문/근거 누락 검사도 공유하여 Review 작성 전에 노출한다.
+  새 K 목표·판단·자동 질문 연결을 추가하지 않으며 같은 누락은 Gate에서도 계속 거부한다.
+  현재 후보의 내부 참조가 잘못됐어도 reference_errors/reference_conflicts와 확보 가능한
+  요구·소비 자료를 반환한다. 완전한 snapshot을 만들 수 없으면 null이며 임의 snapshot을
+  만들어 Review에 쓰지 않는다. 최상위 요청 후보 참조, snapshot 명령과 Gate는 계속 엄격하다.
   selection_context는 같은 readonly snapshot의 후보 전체·선택 자산 전체·그들이 직접
   참조한 EvidenceRecord를 원문 그대로 반환한다. 비교·필요성·추천 승인이 아니다.
 - preflight: --run --operation --input 결과. 실제 prepare/apply 검사 경로를 실행하고
@@ -601,3 +672,31 @@ READY/Commit/COMPLETED는 임의 Review 검사명과 별도로 책임·현재 �
 충분한 단일 해석 또는 실제 공통/조건별 처리는 허용한다. 독립 미래 활용의 존재만으로
 검토를 계속하지 않는다. 의미적 판단은 단일 호스트가 수행하며 코어는 숨은 의도나
 전 세계 미발견 관점을 자동 판정하지 않는다.
+
+## 현재 입력과 예정 결과의 작성 경계 (§§11–14·21.3·24·26·27.14)
+
+DDC.available_actions에는 지원 action 코드만 명시한다. 설명형 대안은 alternatives에
+기록하고 선택 action과 사용 가능한 코드 목록을 따로 대조한다. 코어는 설명을 코드로
+변환하거나 선택 action을 목록에 추가하지 않는다. learning_plan과 learning_results는
+선택한 task의 정확한 ID·버전을 각각 한 번씩 포함한다. 나열 순서는 대응 의미가 아니다.
+누락·중복·다른 버전은 그대로 거부한다.
+
+기존 제공자 변경/닫힌 해석 재대조에서는 결과 작성 전 실제 changes 전체로 patch-refs를
+조회한다. 현재 input_refs는 이전 상태이며 같은 결과에서 생성할 소비·증명 참조는
+명시적인 patch_ref 대상이다. 같은 객체를 수정하면서 현재 숫자를 출력 참조에 복사하지 않는다.
+reference_conflicts의 정확한 필드 경로를 보고 역사 참조/현재 주장/새 소비 대상의 의미를
+구분한다. 역사·원관측 참조까지 일괄 갱신하지 않는다.
+
+닫힌 해석의 새 버전을 후보·기능·자산이 소비하면 해석만 바꾼 결과가 그 소비자를 다시
+무효화할 수 있다. 투영의 invalidated_consumers와 실제 의존성을 확인하고 필요한 소비자
+내용을 직접 대조한 뒤 동일 원자 변경에 명시한다. 기존 의미를 유지한다는 판단과
+예정 연결의 비교를 실제 적용 확인과 구분하여 관측에 남긴다. 변경마다 투영을 재계산하며
+종료 근거는 marker 해석 후 최종 내용으로 계산한다. 어려운 연결에는 기존 preflight를
+사용하고, finish 뒤 실제 현재 상태·의무·Review를 확인한다. 자동 rebind/판단 복사,
+의무 삭제, 자동 retry나 모든 연산의 고정 이중 검사는 추가하지 않는다.
+
+{id, revision} 객체는 스키마가 명시한 이력 필드를 제외하면 environment 내부에서도
+현재 활성 참조다. 과거 관측 대상 버전은 source/locator 및 명시한 관측 버전 문자열로
+보존한다. 이를 새 patch_ref로 바꾸면 실제 관측하지 않은 미래 버전을 관측한 것처럼
+만들 수 있다. 투영의 소유자·필드 경로로 이 차이를 확인하고 실제 관측의 시간·범위를
+보존한다. 현재 의존성의 참조와 과거 관측 위치를 같은 객체 표현으로 혼용하지 않는다.
