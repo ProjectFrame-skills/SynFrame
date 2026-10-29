@@ -211,3 +211,11 @@ This repository distributes the implementation and usage documentation. Personal
 - **A saved run has a different identity:** Do not edit recorded hashes. Use the matching archived installation or a linked follow-up run with explicit reassessment. Installation backups preserve the original code.
 - **Input rejected:** Inspect the current schema and reported field/type. Avoid guessing field names or attaching a newer revision number to an old Review.
 - **Work takes too long:** Distinguish necessary research from repeated retrieval of the same information. End sufficient units while preserving important gaps and follow-up obligations.
+
+## Release automation
+
+Main pushes and pull requests run the existing runtime, CLI, package and isolated-install checks with Python3.11/Node18 and Python3.13/Node24. Run **Publish release** manually for a test-and-package preflight; it does not publish.
+
+For a stable release, update `package.json`, commit to `main`, wait for verification, then push a matching `v<version>` tag. The release workflow verifies the tag belongs to `main`, repeats verification, packs the distribution, publishes the exact tarball through npm trusted publishing, and attaches artifacts to a GitHub release. Failed checks stop publishing. A retry skips an already-published npm version only when its integrity matches exactly.
+
+Maintainer setup: register the package's npm trusted publisher for this repository, workflow **publish.yml**, environment **npm**, with direct publishing allowed. The GitHub `npm` environment permits `v*` tags. No long-lived npm publishing token is stored in GitHub. Agensi packages, where present, are built as release assets; marketplace review remains separate.
