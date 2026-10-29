@@ -32,7 +32,8 @@ jobs:
           mkdir -p dist
           npm pack --pack-destination dist
       - name: Validate npm publish input without publishing
-        run: npm publish --dry-run --access public ./dist/*.tgz
+        # Only the dry run bypasses existing versions; the publish job checks immutable bytes.
+        run: npm publish --dry-run --force --access public ./dist/*.tgz
       - name: Build optional Agensi distributions
         if: hashFiles('tools/build_agensi.py') != ''
         run: python3 tools/build_agensi.py --output dist
