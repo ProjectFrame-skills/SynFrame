@@ -31,6 +31,8 @@ jobs:
         run: |
           mkdir -p dist
           npm pack --pack-destination dist
+      - name: Validate npm publish input without publishing
+        run: npm publish --dry-run --access public ./dist/*.tgz
       - name: Build optional Agensi distributions
         if: hashFiles('tools/build_agensi.py') != ''
         run: python3 tools/build_agensi.py --output dist
@@ -75,7 +77,7 @@ jobs:
           JS
       - name: Publish verified tarball with npm OIDC
         if: steps.registry.outputs.published != 'true'
-        run: npm publish dist/*.tgz --access public --provenance
+        run: npm publish ./dist/*.tgz --access public --provenance
       - name: Attach distributions to GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
